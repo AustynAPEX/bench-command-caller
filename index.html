@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f151c">
+<title>Bench Command Caller</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: camera stage first (it is what the lifter glances at), controls and the rep log below; two columns on wide screens. */
+:root {
+  color-scheme: dark;
+  --ground: #0f151c;
+  --panel: #17202a;
+  --panel-2: #1d2833;
+  --line: #2a3746;
+  --ink: #e9eef3;
+  --muted: #8e9cad;
+  --steel: #82b4e6;
+  --steel-ink: #0d1a27;
+  --white: #f5f8fb;
+  --red: #ec5257;
+  --amber: #e6a53c;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.5 var(--body);
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-text-size-adjust: 100%;
+}
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+
+.app { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+@media (min-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+  .top, .stage { grid-column: 1; }
+  .side { grid-column: 2; grid-row: 1 / span 2; }
+}
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 {
+  margin: 0; font: 700 26px/1 var(--display); letter-spacing: 0.02em; text-transform: uppercase;
+  text-wrap: balance;
+}
+.chip {
+  font: 600 13px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chip.live { color: var(--steel-ink); background: var(--steel); border-color: var(--steel); }
+.chip.warn { color: var(--ground); background: var(--amber); border-color: var(--amber); }
+
+.stage { display: grid; gap: 12px; min-width: 0; }
+.viewport {
+  position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 64svh;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}
+.viewport video, .viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.viewport video { object-fit: contain; background: #000; }
+.viewport canvas { touch-action: manipulation; cursor: crosshair; }
+.placeholder {
+  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px;
+  padding: 20px; text-align: center; color: var(--muted);
+}
+.placeholder p { margin: 0; max-width: 34ch; }
+.placeholder .err { color: var(--red); }
+
+.call {
+  position: absolute; left: 0; right: 0; bottom: 6%; text-align: center; pointer-events: none;
+  font: 700 clamp(56px, 17vw, 132px)/0.9 var(--display); letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--white); text-shadow: 0 2px 18px rgba(0,0,0,0.75);
+  opacity: 0; transform: scale(0.96); transition: opacity 120ms ease, transform 120ms ease;
+}
+.call.on { opacity: 1; transform: scale(1); }
+.call.bad { color: var(--red); font-size: clamp(40px, 11vw, 88px); }
+
+.status {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+.lights { display: flex; gap: 8px; flex: none; }
+.lights span { width: 22px; height: 22px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); }
+.lights.white span { background: var(--white); border-color: var(--white); box-shadow: 0 0 14px rgba(245,248,251,0.45); }
+.lights.red span { background: var(--red); border-color: var(--red); box-shadow: 0 0 14px rgba(236,82,87,0.45); }
+.status p { margin: 0; min-width: 0; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
+  border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600;
+}
+.btn:hover:not(:disabled) { border-color: var(--steel); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--steel); border-color: var(--steel); color: var(--steel-ink); }
+.btn.big { font: 700 20px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; padding: 14px 26px; }
+.btn.armed { background: var(--amber); border-color: var(--amber); color: var(--ground); }
+.swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; vertical-align: -4px; }
+
+.side { display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; min-width: 0; }
+.card h2 { margin: 0; font: 700 15px/1.2 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+.field label { font-size: 13px; color: var(--muted); }
+.field input[type=number], .field select {
+  width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+.field input[type=range] { width: 100%; accent-color: var(--steel); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.check input { accent-color: var(--steel); width: 18px; height: 18px; }
+.note { margin: 0; font-size: 13px; color: var(--muted); }
+
+ol.setup { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+ol.setup li { padding-left: 2px; }
+
+.trace { width: 100%; height: 96px; display: block; }
+
+.logwrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font: 600 12px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+td.num { font-family: var(--mono); font-size: 13px; }
+tr.example td { color: var(--muted); font-style: italic; }
+.pill { font: 600 12px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; }
+.pill.good { background: var(--white); color: var(--ground); }
+.pill.bad { background: var(--red); color: var(--white); }
+.pill.miss { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.summary { margin: 0; font-size: 14px; color: var(--muted); }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) { .call { transition: none; } }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <h1>Bench Command Caller</h1>
+    <span class="chip" id="phaseChip">Camera off</span>
+  </header>
+
+  <section class="stage" aria-label="Camera">
+    <div class="viewport" id="viewport">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay" aria-label="Camera view. Tap the plate to lock tracking."></canvas>
+      <div class="placeholder" id="placeholder">
+        <p>Prop your phone beside the bench, side-on, with the whole bar path in frame.</p>
+        <button class="btn primary big" id="camBtn" type="button">Start camera</button>
+        <p class="err" id="camErr" hidden></p>
+      </div>
+      <div class="call" id="call" aria-live="assertive"></div>
+    </div>
+    <div class="status">
+      <div class="lights" id="lights" aria-label="Last lift result"><span></span><span></span><span></span></div>
+      <p id="hint">Start the camera to begin.</p>
+    </div>
+    <div class="actions">
+      <button class="btn primary big" id="armBtn" type="button" disabled>Arm</button>
+      <button class="btn" id="testBtn" type="button">Test voice</button>
+      <button class="btn" id="flipBtn" type="button" disabled>Flip camera</button>
+      <button class="btn" id="relockBtn" type="button" disabled>Clear tracking</button>
+    </div>
+  </section>
+
+  <div class="side">
+    <section class="card" aria-labelledby="setupTitle">
+      <h2 id="setupTitle">Setup</h2>
+      <ol class="setup">
+        <li>Prop the phone side-on to the bench so the bar's full path stays in frame.</li>
+        <li>Tap a plate on screen to lock tracking <span class="swatch" id="swatch" title="Tracked colour"></span>. Bright coloured plates track best. With black plates, put a strip of coloured tape on the collar or plate edge.</li>
+        <li>Tap Arm, lie down and unrack. You'll hear "Start" once the bar is still at lockout, "Press" after it stops on your chest, and "Rack" when you lock it out.</li>
+        <li>Press before the call and you get red lights and a buzzer.</li>
+      </ol>
+    </section>
+
+    <section class="card" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">Commands</h2>
+      <div class="fields">
+        <div class="field">
+          <label for="minDelay">Pause from (s)</label>
+          <input type="number" id="minDelay" min="0.2" max="5" step="0.1" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="maxDelay">Pause to (s)</label>
+          <input type="number" id="maxDelay" min="0.2" max="6" step="0.1" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="reps">Reps per set</label>
+          <select id="reps">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="still">Motionless test</label>
+          <select id="still">
+            <option value="strict">Strict</option>
+            <option value="normal">Normal</option>
+            <option value="loose">Loose</option>
+          </select>
+        </div>
+        <div class="field wide">
+          <label for="tol">Colour match <span id="tolOut"></span></label>
+          <input type="range" id="tol" min="1" max="10" step="1">
+        </div>
+        <label class="check field wide" for="voiceOn"><input type="checkbox" id="voiceOn"> Speak the commands (off = beeps)</label>
+        <label class="check field wide" for="buzzOn"><input type="checkbox" id="buzzOn"> Buzzer on an early press</label>
+      </div>
+      <p class="note" id="delayNote"></p>
+    </section>
+
+    <section class="card" aria-labelledby="traceTitle">
+      <h2 id="traceTitle">Bar travel</h2>
+      <canvas class="trace" id="trace" aria-label="Bar travel over the last 8 seconds"></canvas>
+    </section>
+
+    <section class="card" aria-labelledby="logTitle">
+      <div class="row">
+        <h2 id="logTitle">Reps</h2>
+        <button class="btn" id="clearLog" type="button">Clear</button>
+      </div>
+      <p class="summary" id="summary">Response is the time from the press call to the bar moving up.</p>
+      <div class="logwrap">
+        <table>
+          <thead><tr><th>#</th><th>Pause</th><th>Response</th><th>Result</th></tr></thead>
+          <tbody id="logBody">
+            <tr class="example"><td>Example</td><td class="num">1.42 s</td><td class="num">268 ms</td><td><span class="pill good">Good lift</span></td></tr>
+            <tr class="example"><td>Example</td><td class="num">0.51 s</td><td class="num">–</td><td><span class="pill bad">Early press</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+// ENGINE START
+// Pure judging logic: feed it (time ms, bar position) samples, it returns events.
+// Positions are normalised by frame height, so thresholds are fractions of the frame.
+class BenchJudge {
+  constructor(cfg = {}) {
+    this.cfg = Object.assign({
+      minDelay: 0.6, maxDelay: 2.0, reps: 1,
+      stillTol: 0.010,   // bar counts as motionless if it stays inside this box
+      moveTol: 0.04,     // movement that counts as an unrack / rerack
+      minRom: 0.07,      // minimum travel from lockout before a stop counts as the chest
+      earlyTol: 0.02,    // upward movement that counts as pressing
+      startHold: 500, chestHold: 200, lockHold: 300, restHold: 2500, missAfter: 8000,
+      rand: Math.random
+    }, cfg);
+    this.learnedRom = null;
+    this.reset();
+    this.phase = 'idle';
+  }
+  set(cfg) { Object.assign(this.cfg, cfg); }
+  reset() {
+    this.hist = []; this.top = null; this.touchT = 0; this.touchDist = 0; this.pressAt = 0;
+    this.pressT = null; this.riseT = null; this.early = false; this.repInSet = 0; this.moved = false; this.delay = 0;
+    this.ref = null;
+  }
+  arm() { this.reset(); this.phase = 'armed'; return [{ type: 'phase', phase: 'armed' }]; }
+  disarm() { this.reset(); this.phase = 'idle'; return [{ type: 'phase', phase: 'idle' }]; }
+  dist(p) { return this.top ? Math.hypot(p.x - this.top.x, p.y - this.top.y) : 0; }
+  span(t, win) {
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity, n = 0;
+    for (let i = this.hist.length - 1; i >= 0; i--) {
+      const q = this.hist[i];
+      if (q.t < t - win) break;
+      n++;
+      if (q.x < minx) minx = q.x; if (q.x > maxx) maxx = q.x;
+      if (q.y < miny) miny = q.y; if (q.y > maxy) maxy = q.y;
+    }
+    return n < 2 ? 0 : Math.max(maxx - minx, maxy - miny);
+  }
+  still(t, hold) {
+    const h = this.hist;
+    if (!h.length || h[0].t > t - hold) return false;
+    let n = 0;
+    for (let i = h.length - 1; i >= 0 && h[i].t >= t - hold; i--) n++;
+    return n >= 3 && this.span(t, hold) <= this.cfg.stillTol;
+  }
+  update(t, p) {
+    const ev = [], c = this.cfg;
+    const go = (phase) => { this.phase = phase; ev.push({ type: 'phase', phase, t }); };
+    if (this.phase === 'idle') return ev;
+    if (!p) {
+      // Lost the bar for a moment: the press call still goes out on time.
+      if (this.phase === 'paused' && t >= this.pressAt) {
+        this.pressT = t; this.riseT = null;
+        ev.push({ type: 'call', word: 'Press', t }); go('pressing');
+      }
+      return ev;
+    }
+    this.hist.push({ t, x: p.x, y: p.y });
+    while (this.hist.length && this.hist[0].t < t - 4000) this.hist.shift();
+    const d = this.dist(p);
+    switch (this.phase) {
+      case 'armed':
+        // Bar sits in the rack; any real travel away from that spot is the unrack.
+        if (!this.ref) this.ref = { x: p.x, y: p.y };
+        if (Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) go('unrack');
+        break;
+      case 'unrack':
+        if (this.still(t, c.startHold)) {
+          this.top = { x: p.x, y: p.y }; this.repInSet = 0;
+          ev.push({ type: 'call', word: 'Start', t }); go('descent');
+        }
+        break;
+      case 'descent': {
+        const need = Math.max(c.minRom, this.learnedRom ? this.learnedRom * 0.7 : 0);
+        if (d > need && this.still(t, c.chestHold)) {
+          this.touchT = t - c.chestHold; this.touchDist = d;
+          this.delay = c.minDelay + c.rand() * (c.maxDelay - c.minDelay);
+          this.pressAt = this.touchT + this.delay * 1000;
+          ev.push({ type: 'touch', t, delay: this.delay }); go('paused');
+        }
+        break;
+      }
+      case 'paused':
+        if (d < this.touchDist - c.earlyTol) {
+          this.early = true; this.pressT = null; this.riseT = t;
+          ev.push({ type: 'fault', reason: 'early', t, pauseMs: t - this.touchT }); go('pressing');
+        } else if (d > this.touchDist + c.earlyTol) {
+          go('descent'); // bar sank further: wait until it is motionless again
+        } else if (t >= this.pressAt) {
+          this.pressT = t; this.riseT = null;
+          ev.push({ type: 'call', word: 'Press', t }); go('pressing');
+        }
+        break;
+      case 'pressing': {
+        if (this.riseT === null && d < this.touchDist - c.earlyTol) {
+          this.riseT = t; ev.push({ type: 'rise', t, reactMs: t - this.pressT });
+        }
+        const since = this.pressT !== null ? this.pressT : this.riseT;
+        if (this.riseT !== null && d < this.touchDist * 0.35 && this.still(t, c.lockHold)) {
+          this.learnedRom = this.touchDist;
+          this.finishRep(t, this.early ? 'early' : 'good', ev, p, go);
+        } else if (t - since > c.missAfter) {
+          this.finishRep(t, 'missed', ev, p, go);
+        }
+        break;
+      }
+      case 'rest':
+        // Wait for the rerack (travel away from lockout), then for the bar to sit still in the rack.
+        if (!this.ref) this.ref = { x: p.x, y: p.y };
+        if (!this.moved && Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) this.moved = true;
+        if (this.moved && this.still(t, c.restHold)) { this.hist = []; this.ref = null; go('armed'); }
+        break;
+    }
+    return ev;
+  }
+  finishRep(t, result, ev, p, go) {
+    this.repInSet++;
+    ev.push({
+      type: 'rep', t, n: this.repInSet, result, delay: this.delay,
+      pauseMs: result === 'early' ? this.riseT - this.touchT : (this.pressT !== null ? this.pressT - this.touchT : null),
+      reactMs: result === 'good' && this.riseT !== null ? this.riseT - this.pressT : null
+    });
+    this.early = false;
+    if (result !== 'missed' && this.repInSet < this.cfg.reps) {
+      this.top = { x: p.x, y: p.y }; this.pressT = null; this.riseT = null; go('descent');
+    } else {
+      ev.push({ type: 'call', word: 'Rack', t }); this.moved = false; this.ref = null; go('rest');
+    }
+  }
+}
+// ENGINE END
+
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  const proc = document.createElement('canvas');
+  const pctx = proc.getContext('2d', { willReadFrequently: true });
+  const traceCv = $('trace'), tctx = traceCv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const C = (n) => css.getPropertyValue(n).trim();
+  const COL = { steel: C('--steel'), white: C('--white'), red: C('--red'), amber: C('--amber'), line: C('--line'), muted: C('--muted') };
+
+  const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, reps: 1, still: 'normal', tol: 4, voice: true, buzz: true };
+  const KEY = 'benchCommandCaller.v1';
+  let settings = { ...DEFAULTS };
+  try { settings = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
+
+  const judge = new BenchJudge();
+  let stream = null, facing = 'environment', loopId = 0;
+  let procW = 160, procH = 120, frame = null;
+  let target = null, lastPx = null, smooth = null, lost = true, lostSince = 0;
+  let pressSpokenAt = null, lastReact = null;
+  const trace = [], marks = [];
+  const MIN_N = 8;
+
+  // ---------- settings ----------
+  function applySettings() {
+    let lo = Math.min(5, Math.max(0.2, Number(settings.minDelay) || DEFAULTS.minDelay));
+    let hi = Math.min(6, Math.max(lo, Number(settings.maxDelay) || DEFAULTS.maxDelay));
+    settings.minDelay = Math.round(lo * 10) / 10; settings.maxDelay = Math.round(hi * 10) / 10;
+    judge.set({ minDelay: settings.minDelay, maxDelay: settings.maxDelay, reps: Number(settings.reps), stillTol: STILL[settings.still] || STILL.normal });
+    $('minDelay').value = settings.minDelay.toFixed(1);
+    $('maxDelay').value = settings.maxDelay.toFixed(1);
+    $('reps').value = String(settings.reps);
+    $('still').value = settings.still;
+    $('tol').value = settings.tol;
+    $('tolOut').textContent = '(' + settings.tol + '/10)';
+    $('voiceOn').checked = !!settings.voice;
+    $('buzzOn').checked = !!settings.buzz;
+    $('delayNote').textContent = 'Press is called a random ' + settings.minDelay.toFixed(1) + '–' + settings.maxDelay.toFixed(1) + ' s after the bar stops on your chest.';
+    save();
+  }
+  ['minDelay', 'maxDelay'].forEach((id) => $(id).addEventListener('change', (e) => { settings[id] = parseFloat(e.target.value); applySettings(); }));
+  $('reps').addEventListener('change', (e) => { settings.reps = Number(e.target.value); applySettings(); });
+  $('still').addEventListener('change', (e) => { settings.still = e.target.value; applySettings(); });
+  $('tol').addEventListener('input', (e) => { settings.tol = Number(e.target.value); applySettings(); });
+  $('voiceOn').addEventListener('change', (e) => { settings.voice = e.target.checked; applySettings(); });
+  $('buzzOn').addEventListener('change', (e) => { settings.buzz = e.target.checked; applySettings(); });
+  applySettings();
+
+  // ---------- audio ----------
+  let actx = null, voice = null;
+  function audio() {
+    if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
+    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
+    return actx;
+  }
+  function tone(freq, ms, type, gain) {
+    const a = audio(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime;
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(gain || 0.2, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
+    o.connect(g).connect(a.destination); o.start(t0); o.stop(t0 + ms / 1000 + 0.02);
+  }
+  function pickVoice() {
+    if (!('speechSynthesis' in window)) return;
+    const vs = speechSynthesis.getVoices();
+    voice = vs.find((v) => /^en[-_]CA/i.test(v.lang)) || vs.find((v) => /^en[-_](US|GB|AU)/i.test(v.lang) && v.localService) || vs.find((v) => /^en/i.test(v.lang)) || null;
+  }
+  if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  function say(word, onStart) {
+    const stamp = () => onStart && onStart(performance.now());
+    if (!settings.voice || !('speechSynthesis' in window)) {
+      tone(word === 'Press' ? 1046 : 784, 170, 'sine', 0.25); stamp(); return;
+    }
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(word);
+    if (voice) u.voice = voice;
+    u.lang = voice ? voice.lang : 'en-CA'; u.rate = 1.1; u.pitch = 0.85; u.volume = 1;
+    u.onstart = stamp;
+    speechSynthesis.speak(u);
+  }
+  function unlockAudio() {
+    audio();
+    if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); }
+  }
+
+  // ---------- wake lock ----------
+  let wake = null;
+  async function keepAwake(on) {
+    try {
+      if (on && 'wakeLock' in navigator) wake = await navigator.wakeLock.request('screen');
+      else if (!on && wake) { await wake.release(); wake = null; }
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && judge.phase !== 'idle') keepAwake(true); });
+
+  // ---------- UI state ----------
+  const PHASE = {
+    armed: ['Armed', 'Lie down and unrack when ready.'],
+    unrack: ['Unrack', 'Hold the bar still at lockout for the start call.'],
+    descent: ['Lower', 'Lower the bar to your chest.'],
+    paused: ['Pause', 'Bar is motionless. Wait for the press call.'],
+    pressing: ['Press', 'Drive to lockout and hold it still.'],
+    rest: ['Rest', 'Rack it. The caller re-arms once the bar sits still in the rack.']
+  };
+  function refreshStatus() {
+    const chip = $('phaseChip');
+    chip.className = 'chip';
+    if (!stream) { chip.textContent = 'Camera off'; $('hint').textContent = 'Start the camera to begin.'; return; }
+    if (!target) { chip.textContent = 'Tap plate'; $('hint').textContent = 'Tap the plate on screen (or coloured tape on the collar) to lock tracking.'; return; }
+    if (lost) { chip.textContent = 'Lost bar'; chip.classList.add('warn'); }
+    if (judge.phase === 'idle') {
+      if (!lost) chip.textContent = 'Locked';
+      $('hint').textContent = lost ? 'Can\'t see the tracked colour. Re-frame the phone or tap the plate again.' : 'Tracking locked. Tap Arm, then lie down.';
+      return;
+    }
+    const [label, hint] = PHASE[judge.phase];
+    if (!lost) { chip.textContent = label; chip.classList.add('live'); }
+    $('hint').textContent = hint;
+  }
+  let callTimer = 0;
+  function showCall(text, bad) {
+    const el = $('call');
+    el.textContent = text; el.classList.toggle('bad', !!bad); el.classList.add('on');
+    clearTimeout(callTimer);
+    callTimer = setTimeout(() => el.classList.remove('on'), bad ? 1600 : 1100);
+  }
+  function setLights(kind) { $('lights').className = 'lights' + (kind ? ' ' + kind : ''); }
+
+  // ---------- log ----------
+  const reps = [];
+  function addRep(e) {
+    const body = $('logBody');
+    if (!reps.length) body.innerHTML = '';
+    const react = e.result === 'good' ? (lastReact !== null ? lastReact : e.reactMs) : null;
+    reps.push({ result: e.result, react });
+    const tr = document.createElement('tr');
+    const pill = e.result === 'good' ? '<span class="pill good">Good lift</span>' : e.result === 'early' ? '<span class="pill bad">Early press</span>' : '<span class="pill miss">No lockout</span>';
+    tr.innerHTML = '<td class="num">' + reps.length + '</td>' +
+      '<td class="num">' + (e.pauseMs !== null ? (e.pauseMs / 1000).toFixed(2) + ' s' : '–') + '</td>' +
+      '<td class="num">' + (react !== null ? Math.max(0, Math.round(react)) + ' ms' : '–') + '</td>' +
+      '<td>' + pill + '</td>';
+    body.prepend(tr);
+    const good = reps.filter((r) => r.result === 'good');
+    const early = reps.filter((r) => r.result === 'early').length;
+    const rs = good.map((r) => r.react).filter((r) => r !== null);
+    const avg = rs.length ? Math.round(rs.reduce((a, b) => a + b, 0) / rs.length) : null;
+    $('summary').textContent = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' · ' + early + ' early' + (avg !== null ? ' · average response ' + avg + ' ms' : '');
+  }
+  $('clearLog').addEventListener('click', () => {
+    reps.length = 0; $('logBody').innerHTML = '';
+    $('summary').textContent = 'Response is the time from the press call to the bar moving up.';
+  });
+
+  // ---------- judge events ----------
+  function handle(events) {
+    for (const e of events) {
+      if (e.type === 'call') {
+        marks.push({ t: e.t, w: e.word[0] });
+        showCall(e.word);
+        if (e.word === 'Start') setLights('');
+        if (e.word === 'Press') { pressSpokenAt = null; lastReact = null; say('Press', (ts) => { pressSpokenAt = ts; }); }
+        else say(e.word);
+      } else if (e.type === 'fault') {
+        showCall('Early press', true); setLights('red');
+        if (settings.buzz) tone(140, 450, 'square', 0.22);
+        marks.push({ t: e.t, w: '!' });
+      } else if (e.type === 'rise') {
+        lastReact = e.t - (pressSpokenAt !== null ? pressSpokenAt : e.t - e.reactMs);
+      } else if (e.type === 'rep') {
+        addRep(e);
+        setLights(e.result === 'good' ? 'white' : 'red');
+      }
+    }
+    if (events.length) refreshStatus();
+  }
+
+  // ---------- tracking ----------
+  function hsv(r, g, b) {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), dl = mx - mn;
+    let h = 0;
+    if (dl) {
+      if (mx === r) h = ((g - b) / dl) % 6; else if (mx === g) h = (b - r) / dl + 2; else h = (r - g) / dl + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return { h, s: mx ? dl / mx : 0, v: mx / 255 };
+  }
+  function track(d, w, h) {
+    const tol = settings.tol, hueTol = 8 + tol * 3, rgbTol = 18 + tol * 7;
+    const useHue = target.s >= 0.28 && target.v >= 0.15;
+    const sMin = Math.max(0.2, target.s * 0.45), vMin = target.v * 0.35;
+    const scan = (x0, y0, x1, y1) => {
+      let sx = 0, sy = 0, n = 0;
+      for (let y = y0; y < y1; y++) {
+        let i = (y * w + x0) * 4;
+        for (let x = x0; x < x1; x++, i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          let ok;
+          if (useHue) {
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+            if (mx / 255 < vMin || !mx || (mx - mn) / mx < sMin) continue;
+            const dl = mx - mn;
+            let hh = mx === r ? ((g - b) / dl) % 6 : mx === g ? (b - r) / dl + 2 : (r - g) / dl + 4;
+            hh *= 60; if (hh < 0) hh += 360;
+            let dh = Math.abs(hh - target.h); if (dh > 180) dh = 360 - dh;
+            ok = dh <= hueTol;
+          } else {
+            const dr = r - target.r, dg = g - target.g, db = b - target.b;
+            ok = dr * dr + dg * dg + db * db <= rgbTol * rgbTol;
+          }
+          if (ok) { sx += x; sy += y; n++; }
+        }
+      }
+      return n >= MIN_N ? { x: sx / n + 0.5, y: sy / n + 0.5 } : null;
+    };
+    let box = [0, 0, w, h];
+    if (lastPx && !lost) {
+      const r = Math.round(h * 0.3);
+      box = [Math.max(0, Math.floor(lastPx.x - r)), Math.max(0, Math.floor(lastPx.y - r)), Math.min(w, Math.ceil(lastPx.x + r)), Math.min(h, Math.ceil(lastPx.y + r))];
+    }
+    let hit = scan(...box);
+    if (!hit && (box[0] > 0 || box[1] > 0 || box[2] < w || box[3] < h)) hit = scan(0, 0, w, h);
+    return hit;
+  }
+
+  // ---------- geometry ----------
+  function contentRect() {
+    const w = overlay.clientWidth, h = overlay.clientHeight;
+    const a = (video.videoWidth || 4) / (video.videoHeight || 3);
+    if (w / h > a) { const cw = h * a; return { x: (w - cw) / 2, y: 0, w: cw, h }; }
+    const ch = w / a; return { x: 0, y: (h - ch) / 2, w, h: ch };
+  }
+  const toScreen = (px, py, r) => [r.x + (px / procW) * r.w, r.y + (py / procH) * r.h];
+
+  overlay.addEventListener('pointerdown', (ev) => {
+    if (!frame) return;
+    const box = overlay.getBoundingClientRect(), r = contentRect();
+    const sx = ev.clientX - box.left - r.x, sy = ev.clientY - box.top - r.y;
+    if (sx < 0 || sy < 0 || sx > r.w || sy > r.h) return;
+    const px = Math.floor((sx / r.w) * procW), py = Math.floor((sy / r.h) * procH);
+    let R = 0, G = 0, B = 0, n = 0;
+    for (let y = py - 2; y <= py + 2; y++) for (let x = px - 2; x <= px + 2; x++) {
+      if (x < 0 || y < 0 || x >= procW || y >= procH) continue;
+      const i = (y * procW + x) * 4; R += frame.data[i]; G += frame.data[i + 1]; B += frame.data[i + 2]; n++;
+    }
+    if (!n) return;
+    R /= n; G /= n; B /= n;
+    target = { r: R, g: G, b: B, ...hsv(R, G, B) };
+    lastPx = { x: px, y: py }; smooth = null; lost = false; judge.learnedRom = null;
+    $('swatch').style.background = 'rgb(' + Math.round(R) + ',' + Math.round(G) + ',' + Math.round(B) + ')';
+    $('armBtn').disabled = false; $('relockBtn').disabled = false;
+    unlockAudio();
+    refreshStatus();
+  });
+
+  // ---------- drawing ----------
+  function fitCanvas(cv) {
+    const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return [w, h];
+  }
+  function drawOverlay(p) {
+    const [w, h] = fitCanvas(overlay); octx.clearRect(0, 0, w, h);
+    if (!target) return;
+    const r = contentRect();
+    if (judge.top) {
+      const [tx, ty] = toScreen(judge.top.x * procH, judge.top.y * procH, r);
+      octx.strokeStyle = COL.steel; octx.lineWidth = 2; octx.setLineDash([6, 5]);
+      octx.beginPath(); octx.moveTo(tx - 40, ty); octx.lineTo(tx + 40, ty); octx.stroke(); octx.setLineDash([]);
+    }
+    if (p) {
+      const [x, y] = toScreen(p.x * procH, p.y * procH, r);
+      const col = judge.phase === 'paused' ? COL.amber : COL.white;
+      octx.strokeStyle = col; octx.lineWidth = 3;
+      octx.beginPath(); octx.arc(x, y, 16, 0, Math.PI * 2); octx.stroke();
+      octx.beginPath(); octx.moveTo(x - 26, y); octx.lineTo(x - 8, y); octx.moveTo(x + 8, y); octx.lineTo(x + 26, y);
+      octx.moveTo(x, y - 26); octx.lineTo(x, y - 8); octx.moveTo(x, y + 8); octx.lineTo(x, y + 26); octx.stroke();
+    } else if (lastPx) {
+      const [x, y] = toScreen(lastPx.x, lastPx.y, r);
+      octx.strokeStyle = COL.red; octx.lineWidth = 2; octx.setLineDash([4, 4]);
+      octx.beginPath(); octx.arc(x, y, 20, 0, Math.PI * 2); octx.stroke(); octx.setLineDash([]);
+    }
+  }
+  function drawTrace(now) {
+    const [w, h] = fitCanvas(traceCv); tctx.clearRect(0, 0, w, h);
+    const span = 8000, t0 = now - span;
+    while (trace.length && trace[0].t < t0) trace.shift();
+    while (marks.length && marks[0].t < t0) marks.shift();
+    const top = 14, bot = h - 6, scale = Math.max(0.2, (judge.learnedRom || 0.2) * 1.15);
+    tctx.strokeStyle = COL.line; tctx.lineWidth = 1;
+    tctx.beginPath(); tctx.moveTo(0, top + 0.5); tctx.lineTo(w, top + 0.5); tctx.stroke();
+    tctx.fillStyle = COL.muted; tctx.font = '11px ' + getComputedStyle(document.body).fontFamily;
+    tctx.fillText('lockout', 4, top - 3);
+    for (const m of marks) {
+      const x = ((m.t - t0) / span) * w;
+      tctx.strokeStyle = m.w === '!' ? COL.red : COL.steel; tctx.beginPath(); tctx.moveTo(x, top); tctx.lineTo(x, bot); tctx.stroke();
+      tctx.fillStyle = m.w === '!' ? COL.red : COL.steel; tctx.fillText(m.w, Math.min(w - 8, x + 3), bot - 2);
+    }
+    tctx.strokeStyle = COL.white; tctx.lineWidth = 2; tctx.beginPath();
+    let started = false;
+    for (const s of trace) {
+      if (s.d === null) { started = false; continue; }
+      const x = ((s.t - t0) / span) * w, y = top + Math.min(1, s.d / scale) * (bot - top);
+      if (!started) { tctx.moveTo(x, y); started = true; } else tctx.lineTo(x, y);
+    }
+    tctx.stroke();
+  }
+
+  // ---------- frame loop ----------
+  function startLoop() {
+    const id = ++loopId;
+    const step = () => {
+      if (id !== loopId || !stream) return;
+      const now = performance.now();
+      let p = null;
+      if (video.readyState >= 2) {
+        pctx.drawImage(video, 0, 0, procW, procH);
+        frame = pctx.getImageData(0, 0, procW, procH);
+        if (target) {
+          const hit = track(frame.data, procW, procH);
+          const wasLost = lost;
+          if (hit) {
+            if (lost && now - lostSince > 300) smooth = null;
+            lastPx = hit; lost = false;
+            const nx = hit.x / procH, ny = hit.y / procH;
+            smooth = smooth ? { x: smooth.x + 0.55 * (nx - smooth.x), y: smooth.y + 0.55 * (ny - smooth.y) } : { x: nx, y: ny };
+            p = smooth;
+          } else if (!lost) { lost = true; lostSince = now; }
+          if (wasLost !== lost) refreshStatus();
+        }
+        handle(judge.update(now, p));
+        trace.push({ t: now, d: p && judge.top ? judge.dist(p) : (p ? 0 : null) });
+        drawOverlay(p);
+        drawTrace(now);
+      }
+      if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(step); else requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  // ---------- camera ----------
+  function camError(msg) { const e = $('camErr'); e.textContent = msg; e.hidden = false; $('placeholder').hidden = false; }
+  async function startCamera() {
+    $('camErr').hidden = true;
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      camError('This browser blocked the camera. Open the page from an https:// address, or open the file in Chrome on a laptop.');
+      return;
+    }
+    try {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      const s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } } });
+      stream = s; video.srcObject = s;
+      await video.play();
+      const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+      if (vw >= vh) { procW = 160; procH = Math.max(60, Math.round(160 * vh / vw)); } else { procH = 160; procW = Math.max(60, Math.round(160 * vw / vh)); }
+      proc.width = procW; proc.height = procH;
+      $('viewport').style.aspectRatio = vw + ' / ' + vh;
+      $('placeholder').hidden = true; $('flipBtn').disabled = false;
+      lastPx = null; smooth = null;
+      refreshStatus(); startLoop();
+    } catch (err) {
+      stream = null;
+      camError(err && err.name === 'NotAllowedError'
+        ? 'Camera access was denied. Allow the camera for this page in your browser settings, then tap Start camera again.'
+        : 'The camera didn\'t start (' + (err && err.message ? err.message : 'unknown error') + '). Close other apps using the camera and try again.');
+      refreshStatus();
+    }
+  }
+  $('camBtn').addEventListener('click', () => { unlockAudio(); startCamera(); });
+  $('flipBtn').addEventListener('click', () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); });
+  $('relockBtn').addEventListener('click', () => {
+    target = null; lastPx = null; smooth = null; lost = true; judge.learnedRom = null;
+    if (judge.phase !== 'idle') setArmed(false);
+    $('swatch').style.background = ''; $('armBtn').disabled = true; $('relockBtn').disabled = true;
+    refreshStatus();
+  });
+
+  // ---------- arm ----------
+  function setArmed(on) {
+    const b = $('armBtn');
+    if (on) { unlockAudio(); handle(judge.arm()); keepAwake(true); b.textContent = 'Disarm'; b.classList.add('armed'); setLights(''); }
+    else { handle(judge.disarm()); keepAwake(false); b.textContent = 'Arm'; b.classList.remove('armed'); }
+    refreshStatus();
+  }
+  $('armBtn').addEventListener('click', () => setArmed(judge.phase === 'idle'));
+  $('testBtn').addEventListener('click', () => { unlockAudio(); showCall('Press'); say('Press'); });
+
+  window.addEventListener('resize', () => { drawOverlay(null); drawTrace(performance.now()); });
+  drawTrace(performance.now());
+  refreshStatus();
+})();
+</script>
+</body>
+</html>
