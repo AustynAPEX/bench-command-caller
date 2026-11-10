@@ -8,4 +8,6 @@ Bench press command caller for Apex Power & Performance athletes. Open it on you
 
 Pressing before the call gives red lights and a buzzer. Each rep logs the pause, your response time to the press call, and bar speed (mean and peak concentric velocity, scaled from a 45 cm plate), with velocity loss per set.
 
+Commands can use your own recorded voice (record Start, Press and Rack once on your phone; silence is trimmed so each call plays instantly), the phone's built-in voice, or beeps.
+
 Speed comes from a 30 fps phone camera, so use it to compare reps on the same setup rather than as encoder-grade numbers.

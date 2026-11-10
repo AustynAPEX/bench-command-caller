@@ -156,6 +156,13 @@ h1 { margin: 2px 0 0; font: 700 17px/1.15 var(--display); letter-spacing: 0.04em
 
 ol.setup { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 
+.clips { display: grid; gap: 8px; }
+.clip { display: grid; grid-template-columns: 5.2em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.clip .word { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
+.clip .len { font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.clip .btn { padding: 8px 12px; }
+.clip .btn.recording { background: var(--red); border-color: var(--red); color: var(--white); }
+
 .trace { width: 100%; height: 96px; display: block; }
 
 .logwrap { overflow-x: auto; }
@@ -272,10 +279,24 @@ tr.setbreak td { border-top: 2px solid var(--line); }
             <option value="loose">Loose</option>
           </select>
         </div>
-        <label class="check field wide" for="voiceOn"><input type="checkbox" id="voiceOn"> Speak the commands (off = beeps)</label>
         <label class="check field wide" for="buzzOn"><input type="checkbox" id="buzzOn"> Buzzer on an early press</label>
       </div>
       <p class="note" id="delayNote"></p>
+    </section>
+
+    <section class="card" aria-labelledby="voiceTitle">
+      <h2 id="voiceTitle">Command voice</h2>
+      <div class="field">
+        <label for="voiceMode">Calls use</label>
+        <select id="voiceMode">
+          <option value="recorded">My recordings</option>
+          <option value="phone">Phone voice</option>
+          <option value="beeps">Beeps</option>
+        </select>
+      </div>
+      <div class="clips" id="clips" aria-live="polite"></div>
+      <p class="note" id="clipMsg">Record each call in a quiet room, close to the phone, the way a head ref says it. Silence before and after is trimmed so the call plays the instant it's triggered.</p>
+      <div><button class="btn" id="clearClips" type="button" hidden>Delete recordings</button></div>
     </section>
 
     <section class="card" aria-labelledby="speedTitle">
@@ -529,10 +550,15 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voice: true, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'phone', buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
-  try { settings = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch (e) {}
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY)) || {};
+    if (saved.voiceMode === undefined && saved.voice === false) saved.voiceMode = 'beeps'; // older "speak the commands" switch
+    delete saved.voice;
+    settings = { ...DEFAULTS, ...saved };
+  } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
   const judge = new BenchJudge();
@@ -567,7 +593,7 @@ class BenchJudge {
     $('body').value = settings.body;
     $('tol').value = settings.tol;
     $('tolOut').textContent = '(' + settings.tol + '/10)';
-    $('voiceOn').checked = !!settings.voice;
+    $('voiceMode').value = settings.voiceMode;
     $('buzzOn').checked = !!settings.buzz;
     $('scale').value = settings.scale;
     $('plateCm').value = settings.plateCm;
@@ -590,7 +616,7 @@ class BenchJudge {
   bind('still', 'still', (el) => el.value);
   bind('body', 'body', (el) => el.value);
   bind('tol', 'tol', (el) => Number(el.value), 'input');
-  bind('voiceOn', 'voice', (el) => el.checked);
+  bind('voiceMode', 'voiceMode', (el) => el.value);
   bind('buzzOn', 'buzz', (el) => el.checked);
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
@@ -599,10 +625,14 @@ class BenchJudge {
 
   // ---------- audio ----------
   let actx = null, voice = null;
-  function audio() {
+  function ctx() {
     if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
-    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
     return actx;
+  }
+  function audio() {
+    const a = ctx();
+    if (a && a.state === 'suspended') a.resume().catch(() => {});
+    return a;
   }
   function tone(freq, ms, type, gain) {
     const a = audio(); if (!a) return;
@@ -619,8 +649,9 @@ class BenchJudge {
   }
   if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
   function say(word, onStart) {
+    if (settings.voiceMode === 'recorded' && clips[word] && playClip(word, onStart)) return;
     const stamp = () => onStart && onStart(performance.now());
-    if (!settings.voice || !('speechSynthesis' in window)) {
+    if (settings.voiceMode === 'beeps' || !('speechSynthesis' in window)) {
       tone(word === 'Press' ? 1046 : 784, 170, 'sine', 0.25); stamp(); return;
     }
     speechSynthesis.cancel();
@@ -634,6 +665,138 @@ class BenchJudge {
     audio();
     if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); }
   }
+
+  // ---------- recorded calls ----------
+  const WORDS = ['Start', 'Press', 'Rack'];
+  const CLIP_KEY = 'benchCommandCaller.clips.v1';
+  const clips = {};          // word -> AudioBuffer, ready to play instantly
+  let clipStore = {};        // word -> base64 WAV, kept in this browser
+  try { clipStore = JSON.parse(localStorage.getItem(CLIP_KEY)) || {}; } catch (e) { clipStore = {}; }
+  let rec = null;
+  const setClipMsg = (t) => { $('clipMsg').textContent = t; };
+  function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+  function bufToB64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+  function decode(ab) {
+    const a = ctx();
+    return new Promise((res, rej) => { if (!a) { rej(new Error('no audio')); return; } const p = a.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+  }
+  // Mono, half-rate for storage, silence trimmed off both ends, peak-normalised, short fades.
+  function processClip(buf) {
+    const ch = buf.numberOfChannels;
+    let data = new Float32Array(buf.length), r = buf.sampleRate;
+    for (let c = 0; c < ch; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) data[i] += d[i] / ch; }
+    if (r >= 44100) { const half = new Float32Array(data.length >> 1); for (let i = 0; i < half.length; i++) half[i] = (data[2 * i] + data[2 * i + 1]) / 2; data = half; r = r / 2; }
+    const win = Math.max(1, Math.round(r * 0.01)), n = Math.floor(data.length / win);
+    if (n < 5) return null;
+    const rms = new Float32Array(n);
+    for (let w = 0; w < n; w++) { let s = 0; for (let i = w * win; i < (w + 1) * win; i++) s += data[i] * data[i]; rms[w] = Math.sqrt(s / win); }
+    const sorted = Array.from(rms).sort((a, b) => a - b);
+    const floor = sorted[Math.floor(n * 0.2)] || 0, loud = sorted[n - 1] || 0;
+    const thr = Math.max(0.01, floor * 4, loud * 0.12);
+    const first = rms.findIndex((v) => v > thr);
+    if (first < 0 || loud < 0.02) return null;
+    let last = n - 1; while (last > first && rms[last] <= thr) last--;
+    const s0 = Math.max(0, (first - 1) * win), s1 = Math.min(data.length, (last + 8) * win);
+    const clip = data.slice(s0, s1);
+    let peak = 0; for (const v of clip) peak = Math.max(peak, Math.abs(v));
+    const g = peak > 0 ? 0.9 / peak : 1, fin = Math.round(r * 0.004), fout = Math.round(r * 0.03);
+    for (let i = 0; i < clip.length; i++) {
+      let v = clip[i] * g;
+      if (i < fin) v *= i / fin;
+      if (i > clip.length - fout) v *= (clip.length - i) / fout;
+      clip[i] = v;
+    }
+    return { samples: clip, rate: r };
+  }
+  function toWav(samples, rate) {
+    const b = new ArrayBuffer(44 + samples.length * 2), v = new DataView(b);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+    v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, samples.length * 2, true);
+    for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
+    return b;
+  }
+  function playClip(word, onStart) {
+    const a = audio(), b = clips[word];
+    if (!a || !b) return false;
+    const src = a.createBufferSource(); src.buffer = b; src.connect(a.destination); src.start();
+    const lat = ((a.baseLatency || 0) + (a.outputLatency || 0)) * 1000;
+    if (onStart) onStart(performance.now() + lat);
+    return true;
+  }
+  function renderClips() {
+    const box = $('clips'); box.innerHTML = '';
+    for (const w of WORDS) {
+      const row = document.createElement('div'); row.className = 'clip';
+      const busy = rec && rec.word === w;
+      row.innerHTML = '<span class="word">' + w + '</span>' +
+        '<span class="len">' + (busy ? 'Recording…' : clips[w] ? clips[w].duration.toFixed(2) + ' s' : 'Not recorded') + '</span>';
+      const r = document.createElement('button'); r.type = 'button'; r.className = 'btn' + (busy ? ' recording' : '');
+      r.textContent = busy ? 'Stop' : clips[w] ? 'Re-record' : 'Record';
+      r.disabled = !!rec && !busy;
+      r.addEventListener('click', () => (busy ? stopRecording() : startRecording(w)));
+      const p = document.createElement('button'); p.type = 'button'; p.className = 'btn'; p.textContent = 'Play';
+      p.disabled = !clips[w] || !!rec;
+      p.addEventListener('click', () => { playClip(w); showCall(w); });
+      row.append(r, p); box.append(row);
+    }
+    $('clearClips').hidden = !WORDS.some((w) => clips[w]);
+  }
+  async function startRecording(word) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setClipMsg('This browser can\'t record audio. Open the page in Chrome or Safari.'); return;
+    }
+    audio();
+    let s;
+    try { s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+    catch (e) {
+      setClipMsg(e && e.name === 'NotAllowedError' ? 'Microphone access was denied. Allow the microphone for this page in your browser settings, then try again.' : 'The microphone didn\'t start. Close other apps using it and try again.');
+      return;
+    }
+    const chunks = [], mr = new MediaRecorder(s);
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    mr.onstop = async () => {
+      s.getTracks().forEach((t) => t.stop()); // release the mic so playback goes back to the loudspeaker
+      rec = null; renderClips();
+      try {
+        const ab = await new Blob(chunks, { type: mr.mimeType || (chunks[0] && chunks[0].type) || '' }).arrayBuffer();
+        const out = processClip(await decode(ab));
+        if (!out) { setClipMsg('Didn\'t catch a word there. Say "' + word + '" louder or closer to the phone.'); return; }
+        saveClip(word, out);
+      } catch (e) { setClipMsg('Couldn\'t read that recording. Try again.'); }
+    };
+    rec = { word, mr, timer: setTimeout(stopRecording, 2500) };
+    mr.start();
+    setClipMsg('Say "' + word + '" now. It stops by itself after 2.5 seconds.');
+    renderClips();
+  }
+  function stopRecording() { if (!rec) return; clearTimeout(rec.timer); if (rec.mr.state !== 'inactive') rec.mr.stop(); }
+  function saveClip(word, out) {
+    const a = ctx();
+    const b = a.createBuffer(1, out.samples.length, out.rate); b.getChannelData(0).set(out.samples);
+    clips[word] = b;
+    clipStore[word] = bufToB64(toWav(out.samples, out.rate));
+    let kept = true;
+    try { localStorage.setItem(CLIP_KEY, JSON.stringify(clipStore)); } catch (e) { kept = false; }
+    if (settings.voiceMode === 'phone') { settings.voiceMode = 'recorded'; applySettings(); }
+    const left = WORDS.filter((w) => !clips[w]);
+    setClipMsg((kept ? '"' + word + '" saved on this phone.' : '"' + word + '" works for this visit, but this browser won\'t keep it for next time.') +
+      (left.length ? ' Still to record: ' + left.join(', ') + '. Unrecorded calls use the phone voice.' : ' All three calls recorded.'));
+    renderClips(); playClip(word); showCall(word);
+  }
+  let clearArmed = 0;
+  $('clearClips').addEventListener('click', () => {
+    const b = $('clearClips');
+    if (Date.now() - clearArmed > 3000) { clearArmed = Date.now(); b.textContent = 'Tap again to delete'; setTimeout(() => { b.textContent = 'Delete recordings'; }, 3000); return; }
+    for (const w of WORDS) delete clips[w];
+    clipStore = {}; try { localStorage.removeItem(CLIP_KEY); } catch (e) {}
+    if (settings.voiceMode === 'recorded') { settings.voiceMode = 'phone'; applySettings(); }
+    b.textContent = 'Delete recordings'; setClipMsg('Recordings deleted. Calls use the phone voice.');
+    renderClips();
+  });
+  (async () => { for (const w of WORDS) { if (!clipStore[w]) continue; try { clips[w] = await decode(b64ToBuf(clipStore[w])); } catch (e) {} } renderClips(); })();
+  renderClips();
 
   // ---------- wake lock ----------
   let wake = null;
