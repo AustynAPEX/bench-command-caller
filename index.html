@@ -156,6 +156,11 @@ h1 { margin: 2px 0 0; font: 700 17px/1.15 var(--display); letter-spacing: 0.04em
 
 ol.setup { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 
+.fields.four { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tempoCode { font: 700 13px/1 var(--mono); letter-spacing: 0.06em; color: var(--muted); }
+.tempoCode.on { color: var(--ink); }
+td.off { color: var(--amber); }
+
 .clips { display: grid; gap: 8px; }
 .clip { display: grid; grid-template-columns: 5.2em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
 .clip .word { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
@@ -284,6 +289,33 @@ tr.setbreak td { border-top: 2px solid var(--line); }
       <p class="note" id="delayNote"></p>
     </section>
 
+    <section class="card" aria-labelledby="tempoTitle">
+      <div class="row">
+        <h2 id="tempoTitle">Tempo work</h2>
+        <span class="tempoCode" id="tempoCode">3-1-X-0</span>
+      </div>
+      <label class="check" for="tempoOn"><input type="checkbox" id="tempoOn"> Metronome at 60 bpm, one click per second</label>
+      <div class="fields four">
+        <div class="field">
+          <label for="tEcc">Lower (s)</label>
+          <select id="tEcc"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option></select>
+        </div>
+        <div class="field">
+          <label for="tPause">Pause (s)</label>
+          <select id="tPause"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+        </div>
+        <div class="field">
+          <label for="tCon">Press (s)</label>
+          <select id="tCon"><option value="X">X</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+        </div>
+        <div class="field">
+          <label for="tTop">Top (s)</label>
+          <select id="tTop"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+        </div>
+      </div>
+      <p class="note" id="tempoNote"></p>
+    </section>
+
     <section class="card" aria-labelledby="voiceTitle">
       <h2 id="voiceTitle">Command voice</h2>
       <div class="field">
@@ -339,10 +371,10 @@ tr.setbreak td { border-top: 2px solid var(--line); }
       <p class="summary" id="summary">Response is the time from the press call to the bar moving up. Speed is mean concentric velocity.</p>
       <div class="logwrap">
         <table>
-          <thead><tr><th>Set·Rep</th><th>Pause</th><th>Response</th><th>m/s</th><th>Peak</th><th>Result</th></tr></thead>
+          <thead><tr><th>Set·Rep</th><th>Lower</th><th>Pause</th><th>Response</th><th>m/s</th><th>Peak</th><th>Result</th></tr></thead>
           <tbody id="logBody">
-            <tr class="example"><td>Example</td><td class="num">1.42 s</td><td class="num">268 ms</td><td class="num">0.38</td><td class="num">0.61</td><td><span class="pill good">Good lift</span></td></tr>
-            <tr class="example"><td>Example</td><td class="num">0.51 s</td><td class="num">–</td><td class="num">0.41</td><td class="num">0.66</td><td><span class="pill bad">Early press</span></td></tr>
+            <tr class="example"><td>Example</td><td class="num">2.9 s</td><td class="num">1.42 s</td><td class="num">268 ms</td><td class="num">0.38</td><td class="num">0.61</td><td><span class="pill good">Good lift</span></td></tr>
+            <tr class="example"><td>Example</td><td class="num">1.8 s</td><td class="num">0.51 s</td><td class="num">–</td><td class="num">0.41</td><td class="num">0.66</td><td><span class="pill bad">Early press</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -368,6 +400,7 @@ class BenchJudge {
       minRom: 0.07,      // minimum travel from lockout before a stop counts as the chest
       earlyTol: 0.02,    // upward travel that counts as pressing
       startHold: 1000,   // bar (and body) still this long before Start
+      tempo: { on: false, ecc: 3, pause: 1, con: null, top: 0 }, // seconds; con null = X (explosive)
       bodyCheck: true, bodyTol: 0.008, // share of the frame allowed to change while "still"
       chestHold: 200, lockHold: 300, restHold: 2500, missAfter: 8000,
       rand: Math.random
@@ -380,7 +413,22 @@ class BenchJudge {
   reset() {
     this.hist = []; this.top = null; this.ref = null; this.touchT = 0; this.touchDist = 0; this.pressAt = 0;
     this.pressT = null; this.riseT = null; this.early = false; this.repInSet = 0; this.moved = false; this.delay = 0;
-    this.con = [];
+    this.con = []; this.desc = []; this.maxD = 0; this.maxT = 0; this.maxIdx = 0; this.ecc = null;
+  }
+  eccTime() {
+    // Lowering time: 5% to 95% of the way down, scaled up to the full descent.
+    const s = this.desc, total = this.touchDist;
+    if (s.length < 3 || !total) return null;
+    const cross = (frac) => {
+      const thr = frac * total;
+      for (let k = 1; k < s.length; k++) {
+        const a = s[k - 1].d, b = s[k].d;
+        if (b >= thr) { if (a >= thr || b === a) return s[k - 1].t; return s[k - 1].t + ((thr - a) / (b - a)) * (s[k].t - s[k - 1].t); }
+      }
+      return null;
+    };
+    const t0 = cross(0.05), t1 = cross(0.95);
+    return t0 === null || t1 === null || t1 <= t0 ? null : (t1 - t0) / 0.9;
   }
   arm() { this.reset(); this.phase = 'armed'; return [{ type: 'phase', phase: 'armed' }]; }
   disarm() { this.reset(); this.phase = 'idle'; return [{ type: 'phase', phase: 'idle' }]; }
@@ -467,18 +515,32 @@ class BenchJudge {
         if (!this.ref) this.ref = { x: p.x, y: p.y };
         if (Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) go('settle');
         break;
-      case 'settle':
+      case 'settle': {
         // Start only once the bar has been still at lockout, and feet and hips too, for the hold time.
-        if (this.still(t, c.startHold) && this.bodyStill(t, c.startHold)) {
+        // In tempo work the top pause sets a longer hold between reps when it's longer.
+        const hold = c.tempo.on && this.repInSet > 0 ? Math.max(c.startHold, c.tempo.top * 1000) : c.startHold;
+        if (this.still(t, hold) && this.bodyStill(t, hold)) {
           this.top = { x: p.x, y: p.y }; this.pressT = null; this.riseT = null; this.early = false;
+          this.desc = []; this.maxD = 0; this.ecc = null;
           ev.push({ type: 'call', word: 'Start', t, rep: this.repInSet + 1 }); go('descent');
         }
         break;
+      }
       case 'descent': {
+        this.desc.push({ t, d });
         const need = Math.max(c.minRom, this.learnedRom ? this.learnedRom * 0.7 : 0);
-        if (d > need && this.still(t, c.chestHold)) {
-          this.touchT = t - c.chestHold; this.touchDist = d;
-          this.delay = c.minDelay + c.rand() * (c.maxDelay - c.minDelay);
+        if (c.tempo.on && c.tempo.pause === 0) {
+          // Touch-and-go tempo: the chest is the deepest point, found when the bar turns around.
+          if (d > this.maxD) { this.maxD = d; this.maxT = t; this.maxIdx = this.desc.length - 1; }
+          if (this.maxD > need && d < this.maxD - c.earlyTol) {
+            this.touchT = this.maxT; this.touchDist = this.maxD; this.ecc = this.eccTime();
+            this.con = this.desc.slice(this.maxIdx);
+            this.pressT = null; this.riseT = t; this.early = false; this.delay = 0;
+            ev.push({ type: 'touch', t: this.maxT, delay: 0 }); go('pressing');
+          }
+        } else if (d > need && this.still(t, c.chestHold)) {
+          this.touchT = t - c.chestHold; this.touchDist = d; this.ecc = this.eccTime();
+          this.delay = c.tempo.on ? c.tempo.pause : c.minDelay + c.rand() * (c.maxDelay - c.minDelay);
           this.pressAt = this.touchT + this.delay * 1000;
           this.con = [{ t, d }];
           ev.push({ type: 'touch', t, delay: this.delay }); go('paused');
@@ -522,11 +584,13 @@ class BenchJudge {
   }
   finishRep(t, result, ev, go) {
     this.repInSet++;
+    const sp = result === 'missed' ? null : this.speed();
     ev.push({
       type: 'rep', t, n: this.repInSet, of: this.cfg.reps, result, delay: this.delay,
       pauseMs: result === 'early' ? this.riseT - this.touchT : (this.pressT !== null ? this.pressT - this.touchT : null),
-      reactMs: result === 'good' && this.riseT !== null ? this.riseT - this.pressT : null,
-      speed: result === 'missed' ? null : this.speed()
+      reactMs: result === 'good' && this.riseT !== null && this.pressT !== null ? this.riseT - this.pressT : null,
+      speed: sp, eccMs: this.ecc, conMs: sp ? sp.conMs / 0.95 : null,
+      tempo: this.cfg.tempo.on ? { ...this.cfg.tempo } : null
     });
     this.early = false;
     if (result !== 'missed' && this.repInSet < this.cfg.reps) {
@@ -550,7 +614,7 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
@@ -582,11 +646,25 @@ class BenchJudge {
     settings.startHold = r1(clamp(settings.startHold, 0.3, 4, DEFAULTS.startHold));
     settings.plateCm = clamp(settings.plateCm, 20, 60, DEFAULTS.plateCm);
     settings.travelCm = clamp(settings.travelCm, 10, 80, DEFAULTS.travelCm);
+    const tcon = settings.tCon === 'X' ? null : Number(settings.tCon);
     judge.set({
       minDelay: settings.minDelay, maxDelay: settings.maxDelay, reps: Number(settings.reps),
       startHold: settings.startHold * 1000, stillTol: STILL[settings.still] || STILL.normal,
-      bodyCheck: settings.body !== 'off', bodyTol: BODY[settings.body] || BODY.normal
+      bodyCheck: settings.body !== 'off', bodyTol: BODY[settings.body] || BODY.normal,
+      tempo: { on: !!settings.tempoOn, ecc: Number(settings.tEcc), pause: Number(settings.tPause), con: tcon, top: Number(settings.tTop) }
     });
+    const code = settings.tEcc + '-' + settings.tPause + '-' + settings.tCon + '-' + settings.tTop;
+    $('tempoOn').checked = !!settings.tempoOn;
+    $('tEcc').value = String(settings.tEcc); $('tPause').value = String(settings.tPause);
+    $('tCon').value = String(settings.tCon); $('tTop').value = String(settings.tTop);
+    $('tempoCode').textContent = code; $('tempoCode').classList.toggle('on', !!settings.tempoOn);
+    $('minDelay').disabled = $('maxDelay').disabled = !!settings.tempoOn;
+    $('tempoNote').textContent = settings.tempoOn
+      ? 'Each rep: clicks start with the Start call. Lower over ' + settings.tEcc + ' click' + (settings.tEcc == 1 ? '' : 's') + ' (the chest beat is accented)' +
+        (Number(settings.tPause) > 0 ? ', hold ' + settings.tPause + ' s, then Press is called.' : ', then touch and go with no press call.') +
+        ' Your actual lowering time is logged against ' + settings.tEcc + ' s.'
+      : 'Off. Turn it on to run a 60 bpm metronome through each rep and log lowering time against your tempo.';
+    if (!settings.tempoOn) metroStop();
     $('minDelay').value = settings.minDelay.toFixed(1);
     $('maxDelay').value = settings.maxDelay.toFixed(1);
     $('startHold').value = settings.startHold.toFixed(1);
@@ -603,8 +681,9 @@ class BenchJudge {
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
     $('delayNote').textContent = 'Start comes after ' + settings.startHold.toFixed(1) + ' s of stillness' +
-      (settings.body === 'off' ? ' (bar only)' : ' (bar, feet and hips)') + '. Press comes a random ' +
-      settings.minDelay.toFixed(1) + '–' + settings.maxDelay.toFixed(1) + ' s after the bar stops on your chest.';
+      (settings.body === 'off' ? ' (bar only)' : ' (bar, feet and hips)') + '. ' +
+      (settings.tempoOn ? 'Tempo work is on, so the press pause comes from your tempo (' + settings.tPause + ' s), not this range.'
+        : 'Press comes a random ' + settings.minDelay.toFixed(1) + '–' + settings.maxDelay.toFixed(1) + ' s after the bar stops on your chest.');
     $('scaleNote').textContent = settings.scale === 'plate'
       ? 'Speed is scaled from the tracked plate. Track a full plate face (competition and bumper plates are 45 cm). The dashed ring on screen should sit on the plate\'s edge.'
       : 'Speed is scaled from your chest-to-lockout distance. Use this when you track tape instead of a plate.';
@@ -623,6 +702,34 @@ class BenchJudge {
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
   bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
+  bind('tempoOn', 'tempoOn', (el) => el.checked);
+  bind('tEcc', 'tEcc', (el) => Number(el.value));
+  bind('tPause', 'tPause', (el) => Number(el.value));
+  bind('tCon', 'tCon', (el) => (el.value === 'X' ? 'X' : Number(el.value)));
+  bind('tTop', 'tTop', (el) => Number(el.value));
+
+  // ---------- metronome (60 bpm, scheduled on the audio clock so clicks don't drift) ----------
+  const metro = { origin: null, next: 0, beat: 0 };
+  function metroStart(originMs) { metro.origin = originMs; metro.beat = 1; metro.next = originMs + 1000; }
+  function metroStop() { metro.origin = null; }
+  function click(when, accent) {
+    const a = actx; if (!a) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'square'; o.frequency.value = accent ? 2400 : 1500;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(accent ? 0.32 : 0.2, when + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
+    o.connect(g).connect(a.destination); o.start(when); o.stop(when + 0.06);
+  }
+  setInterval(() => {
+    if (metro.origin === null || !actx || actx.state !== 'running') return;
+    const nowPerf = performance.now();
+    while (metro.next < nowPerf + 150) {
+      const when = actx.currentTime + (metro.next - nowPerf) / 1000;
+      if (when >= actx.currentTime - 0.01) click(Math.max(when, actx.currentTime), metro.beat === Number(settings.tEcc));
+      metro.next += 1000; metro.beat++;
+    }
+  }, 25);
   applySettings();
 
   // ---------- audio ----------
@@ -908,7 +1015,11 @@ class BenchJudge {
     const tr = document.createElement('tr');
     if (e.n === 1 && reps.length > 1) tr.className = 'setbreak';
     const pill = e.result === 'good' ? '<span class="pill good">Good lift</span>' : e.result === 'early' ? '<span class="pill bad">Early press</span>' : '<span class="pill miss">No lockout</span>';
+    const ecc = e.eccMs !== null && e.eccMs !== undefined ? e.eccMs / 1000 : null;
+    const eccOff = e.tempo && ecc !== null && Math.abs(ecc - e.tempo.ecc) > 0.5;
+    reps[reps.length - 1].ecc = ecc; reps[reps.length - 1].eccTarget = e.tempo ? e.tempo.ecc : null;
     tr.innerHTML = '<td class="num">' + setNo + '·' + e.n + '</td>' +
+      '<td class="num' + (eccOff ? ' off' : '') + '"' + (eccOff ? ' title="Off the ' + e.tempo.ecc + ' s target"' : '') + '>' + (ecc !== null ? ecc.toFixed(1) + ' s' : '–') + '</td>' +
       '<td class="num">' + (e.pauseMs !== null ? (e.pauseMs / 1000).toFixed(2) + ' s' : '–') + '</td>' +
       '<td class="num">' + (react !== null ? Math.max(0, Math.round(react)) + ' ms' : '–') + '</td>' +
       '<td class="num">' + (m ? m.mean.toFixed(2) : '–') + '</td>' +
@@ -929,6 +1040,10 @@ class BenchJudge {
     const avg = rs.length ? Math.round(rs.reduce((a, b) => a + b, 0) / rs.length) : null;
     let text = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' · ' + early + ' early';
     if (avg !== null) text += ' · average response ' + avg + ' ms';
+    if (e.tempo) {
+      const setEcc = reps.slice(-e.n).map((r) => r.ecc).filter((v) => v !== null);
+      if (setEcc.length) text += ' · lowering ' + (setEcc.reduce((a, b) => a + b, 0) / setEcc.length).toFixed(1) + ' s average vs ' + e.tempo.ecc + ' s target';
+    }
     if (e.n === e.of && setMeans.length > 1) {
       const best = Math.max(...setMeans), last = setMeans[setMeans.length - 1];
       text += ' · set ' + setNo + ' velocity loss ' + Math.round(((best - last) / best) * 100) + '%';
@@ -946,7 +1061,7 @@ class BenchJudge {
       if (e.type === 'call') {
         marks.push({ t: e.t, w: e.word[0] });
         showCall(e.word);
-        if (e.word === 'Start') { setLights(''); scaleAtStart = plateScale(); }
+        if (e.word === 'Start') { setLights(''); scaleAtStart = plateScale(); if (settings.tempoOn) metroStart(e.t); }
         if (e.word === 'Press') { pressSpokenAt = null; lastReact = null; say('Press', (ts) => { pressSpokenAt = ts; }); }
         else say(e.word);
       } else if (e.type === 'fault') {
@@ -956,6 +1071,7 @@ class BenchJudge {
       } else if (e.type === 'rise') {
         lastReact = e.t - (pressSpokenAt !== null ? pressSpokenAt : e.t - e.reactMs);
       } else if (e.type === 'rep') {
+        metroStop();
         addRep(e);
         setLights(e.result === 'good' ? 'white' : 'red');
       }
@@ -1246,7 +1362,7 @@ class BenchJudge {
   function setArmed(on) {
     const b = $('armBtn');
     if (on) { unlockAudio(); handle(judge.arm()); keepAwake(true); b.textContent = 'Disarm'; b.classList.add('armed'); setLights(''); }
-    else { handle(judge.disarm()); keepAwake(false); b.textContent = 'Arm'; b.classList.remove('armed'); }
+    else { handle(judge.disarm()); metroStop(); keepAwake(false); b.textContent = 'Arm'; b.classList.remove('armed'); }
     refreshStatus();
   }
   $('armBtn').addEventListener('click', () => setArmed(judge.phase === 'idle'));
