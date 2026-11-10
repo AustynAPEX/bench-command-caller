@@ -9,6 +9,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Bench Caller">
 <title>Apex Command Caller</title>
+<script>
+  // The camera only works over https: send anyone who lands on plain http to the secure address.
+  if (location.protocol === 'http:' && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) location.replace('https://' + location.host + location.pathname + location.search + location.hash);
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
