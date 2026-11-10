@@ -550,18 +550,20 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'phone', buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY)) || {};
-    if (saved.voiceMode === undefined && saved.voice === false) saved.voiceMode = 'beeps'; // older "speak the commands" switch
+    if (saved.voiceMode === undefined && saved.voice === false) { saved.voiceMode = 'beeps'; saved.voiceChosen = true; } // older "speak the commands" switch
+    if (!saved.voiceChosen && saved.voiceMode === 'phone') saved.voiceMode = 'apex'; // never picked: use the coach's voice when it's there
     delete saved.voice;
     settings = { ...DEFAULTS, ...saved };
   } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {} };
 
   const judge = new BenchJudge();
+  let apexReady = false; // coach's recorded calls are on the site and loaded
   let stream = null, facing = 'environment', loopId = 0;
   let procW = 160, procH = 120, frame = null;
   let target = null, lastPx = null, smooth = null, lost = true, lostSince = 0;
@@ -593,7 +595,7 @@ class BenchJudge {
     $('body').value = settings.body;
     $('tol').value = settings.tol;
     $('tolOut').textContent = '(' + settings.tol + '/10)';
-    $('voiceMode').value = settings.voiceMode;
+    $('voiceMode').value = settings.voiceMode === 'apex' && !apexReady ? 'phone' : settings.voiceMode;
     $('buzzOn').checked = !!settings.buzz;
     $('scale').value = settings.scale;
     $('plateCm').value = settings.plateCm;
@@ -616,7 +618,7 @@ class BenchJudge {
   bind('still', 'still', (el) => el.value);
   bind('body', 'body', (el) => el.value);
   bind('tol', 'tol', (el) => Number(el.value), 'input');
-  bind('voiceMode', 'voiceMode', (el) => el.value);
+  bind('voiceMode', 'voiceMode', (el) => { settings.voiceChosen = true; return el.value; });
   bind('buzzOn', 'buzz', (el) => el.checked);
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
@@ -650,6 +652,7 @@ class BenchJudge {
   if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
   function say(word, onStart) {
     if (settings.voiceMode === 'recorded' && clips[word] && playClip(word, onStart)) return;
+    if ((settings.voiceMode === 'apex' || (settings.voiceMode === 'recorded' && !clips[word])) && apexClips[word] && playBuffer(apexClips[word], onStart)) return;
     const stamp = () => onStart && onStart(performance.now());
     if (settings.voiceMode === 'beeps' || !('speechSynthesis' in window)) {
       tone(word === 'Press' ? 1046 : 784, 170, 'sine', 0.25); stamp(); return;
@@ -717,14 +720,15 @@ class BenchJudge {
     for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
     return b;
   }
-  function playClip(word, onStart) {
-    const a = audio(), b = clips[word];
+  function playBuffer(b, onStart) {
+    const a = audio();
     if (!a || !b) return false;
     const src = a.createBufferSource(); src.buffer = b; src.connect(a.destination); src.start();
     const lat = ((a.baseLatency || 0) + (a.outputLatency || 0)) * 1000;
     if (onStart) onStart(performance.now() + lat);
     return true;
   }
+  const playClip = (word, onStart) => playBuffer(clips[word], onStart);
   function renderClips() {
     const box = $('clips'); box.innerHTML = '';
     for (const w of WORDS) {
@@ -779,10 +783,10 @@ class BenchJudge {
     clipStore[word] = bufToB64(toWav(out.samples, out.rate));
     let kept = true;
     try { localStorage.setItem(CLIP_KEY, JSON.stringify(clipStore)); } catch (e) { kept = false; }
-    if (settings.voiceMode === 'phone') { settings.voiceMode = 'recorded'; applySettings(); }
+    if (settings.voiceMode === 'phone' || settings.voiceMode === 'apex') { settings.voiceMode = 'recorded'; settings.voiceChosen = true; applySettings(); }
     const left = WORDS.filter((w) => !clips[w]);
     setClipMsg((kept ? '"' + word + '" saved on this phone.' : '"' + word + '" works for this visit, but this browser won\'t keep it for next time.') +
-      (left.length ? ' Still to record: ' + left.join(', ') + '. Unrecorded calls use the phone voice.' : ' All three calls recorded.'));
+      (left.length ? ' Still to record: ' + left.join(', ') + '. Unrecorded calls use ' + (apexReady ? 'the coach\'s voice.' : 'the phone voice.') : ' All three calls recorded.'));
     renderClips(); playClip(word); showCall(word);
   }
   let clearArmed = 0;
@@ -791,10 +795,28 @@ class BenchJudge {
     if (Date.now() - clearArmed > 3000) { clearArmed = Date.now(); b.textContent = 'Tap again to delete'; setTimeout(() => { b.textContent = 'Delete recordings'; }, 3000); return; }
     for (const w of WORDS) delete clips[w];
     clipStore = {}; try { localStorage.removeItem(CLIP_KEY); } catch (e) {}
-    if (settings.voiceMode === 'recorded') { settings.voiceMode = 'phone'; applySettings(); }
-    b.textContent = 'Delete recordings'; setClipMsg('Recordings deleted. Calls use the phone voice.');
+    if (settings.voiceMode === 'recorded') { settings.voiceMode = apexReady ? 'apex' : 'phone'; applySettings(); }
+    b.textContent = 'Delete recordings'; setClipMsg('Recordings deleted. Calls use ' + (apexReady ? 'the coach\'s voice.' : 'the phone voice.'));
     renderClips();
   });
+  // Coach's own calls, published with the site (voice/start.wav, press.wav, rack.wav): the default for every athlete.
+  const apexClips = {};
+  (async () => {
+    const got = await Promise.all(WORDS.map(async (w) => {
+      try {
+        const r = await fetch('voice/' + w.toLowerCase() + '.wav', { cache: 'no-cache' });
+        if (!r.ok) return false;
+        apexClips[w] = await decode(await r.arrayBuffer());
+        return true;
+      } catch (e) { return false; }
+    }));
+    if (!got.every(Boolean)) return;
+    apexReady = true;
+    const o = document.createElement('option'); o.value = 'apex'; o.textContent = 'Coach Austyn (Apex)';
+    $('voiceMode').prepend(o);
+    if (!settings.voiceChosen && settings.voiceMode !== 'recorded') settings.voiceMode = 'apex';
+    applySettings();
+  })();
   (async () => { for (const w of WORDS) { if (!clipStore[w]) continue; try { clips[w] = await decode(b64ToBuf(clipStore[w])); } catch (e) {} } renderClips(); })();
   renderClips();
 
