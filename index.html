@@ -353,11 +353,12 @@ tr.setbreak td { border-top: 2px solid var(--line); }
           <label for="plateCm">Plate diameter (cm)</label>
           <input type="number" id="plateCm" min="20" max="60" step="0.5" inputmode="decimal">
         </div>
+        <label class="check field wide" for="showMask"><input type="checkbox" id="showMask"> Show what the tracker sees (white = following, red = ignoring)</label>
         <div class="field wide">
           <label for="fps">Camera frame rate</label>
           <select id="fps">
-            <option value="60">60 fps (sharper speed numbers)</option>
-            <option value="30">30 fps (steadier under flickering lights)</option>
+            <option value="30">30 fps (recommended)</option>
+            <option value="60">60 fps (experimental, sharper on fast reps)</option>
           </select>
         </div>
         <div class="field" id="travelField" hidden>
@@ -393,7 +394,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </div>
 
   <footer class="foot">
-    <span>Apex Power &amp; Performance</span>
+    <span>Apex Power &amp; Performance · build 9</span>
     <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
   </footer>
 </main>
@@ -619,6 +620,7 @@ class BenchJudge {
   const proc = document.createElement('canvas');
   const pctx = proc.getContext('2d', { willReadFrequently: true });
   const mid = document.createElement('canvas'), mctx = mid.getContext('2d');
+  const maskCv = document.createElement('canvas'), mctx2 = maskCv.getContext('2d'); let maskImg = null;
   const traceCv = $('trace'), tctx = traceCv.getContext('2d');
   const css = getComputedStyle(document.documentElement);
   const C = (n) => css.getPropertyValue(n).trim();
@@ -626,13 +628,14 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 60, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY)) || {};
     if (saved.voiceMode === undefined && saved.voice === false) { saved.voiceMode = 'beeps'; saved.voiceChosen = true; } // older "speak the commands" switch
-    if (!saved.voiceChosen && saved.voiceMode === 'phone') saved.voiceMode = 'apex'; // never picked: use the coach's voice when it's there
+    if (!saved.voiceChosen && saved.voiceMode === 'phone') saved.voiceMode = 'apex';
+    if (!saved.fpsChosen) delete saved.fps; // never picked: use the steadier 30 fps default // never picked: use the coach's voice when it's there
     delete saved.voice;
     settings = { ...DEFAULTS, ...saved };
   } catch (e) {}
@@ -691,6 +694,7 @@ class BenchJudge {
     $('plateCm').value = settings.plateCm;
     $('travelCm').value = settings.travelCm;
     $('fps').value = String(settings.fps);
+    $('showMask').checked = !!settings.showMask;
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
     $('delayNote').textContent = 'Start comes after ' + settings.startHold.toFixed(1) + ' s of stillness' +
@@ -715,7 +719,8 @@ class BenchJudge {
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
   bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
-  $('fps').addEventListener('change', (e) => { settings.fps = Number(e.target.value); applySettings(); if (stream) startCamera(); });
+  $('fps').addEventListener('change', (e) => { settings.fps = Number(e.target.value); settings.fpsChosen = true; applySettings(); if (stream) startCamera(); });
+  bind('showMask', 'showMask', (el) => el.checked);
   bind('tempoOn', 'tempoOn', (el) => el.checked);
   bind('tEcc', 'tEcc', (el) => Number(el.value));
   bind('tPause', 'tPause', (el) => Number(el.value));
@@ -1107,7 +1112,7 @@ class BenchJudge {
   // Mark the pixels that match the tracked colour, split them into connected blobs, and follow the
   // biggest blob near where the plate was last seen. Stray matches elsewhere (a shirt, rack paint,
   // sensor speckle) no longer pull the crosshair around.
-  let maskBuf = null, labelBuf = null, stackBuf = null;
+  let maskBuf = null, labelBuf = null, stackBuf = null, lastScan = null;
   function track(d, w, h) {
     const tol = settings.tol, hueTol = 8 + tol * 3, rgbTol = 18 + tol * 7;
     const useHue = target.s >= 0.28 && target.v >= 0.15;
@@ -1165,10 +1170,11 @@ class BenchJudge {
             bestScore = score;
             const vx = Math.max(0, sxx / n - mx * mx), vy = Math.max(0, syy / n - my * my);
             // a filled disc of radius r has variance r²/4 on each axis, so diameter = 4·sqrt(variance)
-            best = { x: mx + 0.5, y: my + 0.5, n, diam: 4 * Math.sqrt((vx + vy) / 2) };
+            best = { x: mx + 0.5, y: my + 0.5, n, diam: 4 * Math.sqrt((vx + vy) / 2), label };
           }
         }
       }
+      if (best) lastScan = { x0, y0, x1, y1, label: best.label };
       return best;
     };
     let box = [0, 0, w, h];
@@ -1260,6 +1266,21 @@ class BenchJudge {
     const [w, h] = fitCanvas(overlay); octx.clearRect(0, 0, w, h);
     if (!target) return;
     const r = contentRect();
+    if (settings.showMask && lastScan && maskBuf) {
+      // what the tracker sees: white = the blob it is following, red = other matches it is ignoring
+      if (maskCv.width !== procW || maskCv.height !== procH) { maskCv.width = procW; maskCv.height = procH; maskImg = mctx2.createImageData(procW, procH); }
+      const md = maskImg.data; md.fill(0);
+      for (let y = lastScan.y0; y < lastScan.y1; y++) for (let x = lastScan.x0; x < lastScan.x1; x++) {
+        const k = y * procW + x; if (!maskBuf[k]) continue;
+        const mine = labelBuf[k] === lastScan.label, i = k * 4;
+        md[i] = 255; md[i + 1] = mine ? 255 : 60; md[i + 2] = mine ? 255 : 60; md[i + 3] = mine ? 150 : 170;
+      }
+      mctx2.putImageData(maskImg, 0, 0);
+      octx.imageSmoothingEnabled = false; octx.drawImage(maskCv, r.x, r.y, r.w, r.h); octx.imageSmoothingEnabled = true;
+      octx.strokeStyle = COL.muted; octx.lineWidth = 1; octx.setLineDash([2, 4]);
+      const [bx0, by0] = toScreen(lastScan.x0, lastScan.y0, r), [bx1, by1] = toScreen(lastScan.x1, lastScan.y1, r);
+      octx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); octx.setLineDash([]);
+    }
     if (judge.top) {
       const [tx, ty] = toScreen(judge.top.x * procH, judge.top.y * procH, r);
       octx.strokeStyle = COL.muted; octx.lineWidth = 2; octx.setLineDash([6, 5]);
@@ -1314,19 +1335,27 @@ class BenchJudge {
   // When was this frame actually captured? Prefer the camera's own timestamp over the moment
   // the browser gets round to processing it, which jitters by tens of milliseconds.
   let mediaOffset = null, lastFrameT = null, lastVidTime = -1, frameDt = null;
+  // Use the camera's own frame timestamps only if, over the first frames, they keep moving forward and
+  // agree with the real clock. Otherwise use the real clock for the whole session, so a browser that
+  // reports odd timestamps can never stall or scramble the tracking.
+  let tsMode = null, tsChecks = 0;
+  function metaTime(meta, wall) {
+    if (!meta) return null;
+    if (typeof meta.captureTime === 'number' && meta.captureTime > 0) return meta.captureTime;
+    if (typeof meta.mediaTime === 'number' && meta.mediaTime > 0) {
+      if (mediaOffset === null) mediaOffset = wall - meta.mediaTime * 1000;
+      return meta.mediaTime * 1000 + mediaOffset;
+    }
+    return null;
+  }
   function frameTime(meta) {
     const wall = performance.now();
-    if (meta) {
-      if (typeof meta.captureTime === 'number' && meta.captureTime > 0 && Math.abs(wall - meta.captureTime) < 1000) return meta.captureTime;
-      if (typeof meta.mediaTime === 'number' && meta.mediaTime > 0) {
-        if (mediaOffset === null) mediaOffset = wall - meta.mediaTime * 1000;
-        const t = meta.mediaTime * 1000 + mediaOffset;
-        if (Math.abs(wall - t) < 1000) return t;
-        mediaOffset = wall - meta.mediaTime * 1000; // stream restarted or drifted: re-anchor
-        return meta.mediaTime * 1000 + mediaOffset;
-      }
-    }
-    return wall;
+    if (tsMode === 'wall') return wall;
+    const t = metaTime(meta, wall);
+    const ok = t !== null && wall - t < 150 && t - wall < 5 && (lastFrameT === null || t > lastFrameT);
+    if (!ok) { tsMode = 'wall'; return wall; }
+    if (tsMode === null && ++tsChecks >= 20) tsMode = 'meta';
+    return t;
   }
   function showFps() {
     const el = $('fpsNote');
@@ -1343,8 +1372,8 @@ class BenchJudge {
       if (video.readyState < 2) { next(); return; }
       // Without frame callbacks, only process a frame once.
       if (!meta) { if (video.currentTime === lastVidTime) { next(); return; } lastVidTime = video.currentTime; }
-      const now = frameTime(meta);
-      if (lastFrameT !== null && now <= lastFrameT) { next(); return; }
+      let now = frameTime(meta);
+      if (lastFrameT !== null && now <= lastFrameT) now = lastFrameT + 0.5; // never drop a frame over its timestamp
       if (lastFrameT !== null) { const dt = now - lastFrameT; if (dt < 200) frameDt = frameDt ? frameDt + 0.05 * (dt - frameDt) : dt; }
       lastFrameT = now;
       if (++fpsTimer % 30 === 0) showFps();
@@ -1390,8 +1419,8 @@ class BenchJudge {
       stream = null;
       // 60 fps: ask for it first (many phones only offer it at 720p), fall back to whatever the camera gives.
       // 30 fps: steadier under flickering gym lights.
-      const tries = Number(settings.fps) === 30
-        ? [{ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, { width: { ideal: 640 }, height: { ideal: 480 } }]
+      const tries = Number(settings.fps) !== 60
+        ? [{ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, {}]
         : [
             { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 50 } },
             { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 50 } },
@@ -1404,7 +1433,7 @@ class BenchJudge {
       }
       if (!s) throw lastErr || new Error('no camera');
       stream = s; video.srcObject = s;
-      mediaOffset = null; lastFrameT = null; lastVidTime = -1; frameDt = null; showFps();
+      mediaOffset = null; lastFrameT = null; lastVidTime = -1; frameDt = null; tsMode = null; tsChecks = 0; showFps();
       await video.play();
       const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
       const P = 240; // processing size (long side): finer than before, so the centre of the plate is steadier
