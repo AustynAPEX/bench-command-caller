@@ -353,6 +353,13 @@ tr.setbreak td { border-top: 2px solid var(--line); }
           <label for="plateCm">Plate diameter (cm)</label>
           <input type="number" id="plateCm" min="20" max="60" step="0.5" inputmode="decimal">
         </div>
+        <div class="field wide">
+          <label for="fps">Camera frame rate</label>
+          <select id="fps">
+            <option value="60">60 fps (sharper speed numbers)</option>
+            <option value="30">30 fps (steadier under flickering lights)</option>
+          </select>
+        </div>
         <div class="field" id="travelField" hidden>
           <label for="travelCm">Chest to lockout (cm)</label>
           <input type="number" id="travelCm" min="10" max="80" step="0.5" inputmode="decimal">
@@ -611,6 +618,7 @@ class BenchJudge {
   const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
   const proc = document.createElement('canvas');
   const pctx = proc.getContext('2d', { willReadFrequently: true });
+  const mid = document.createElement('canvas'), mctx = mid.getContext('2d');
   const traceCv = $('trace'), tctx = traceCv.getContext('2d');
   const css = getComputedStyle(document.documentElement);
   const C = (n) => css.getPropertyValue(n).trim();
@@ -618,7 +626,7 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 60, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
@@ -634,7 +642,7 @@ class BenchJudge {
   let apexReady = false; // coach's recorded calls are on the site and loaded
   let stream = null, facing = 'environment', loopId = 0;
   let procW = 160, procH = 120, frame = null;
-  let target = null, lastPx = null, smooth = null, lost = true, lostSince = 0;
+  let target = null, lastPx = null, lost = true, lostSince = 0;
   let pressSpokenAt = null, lastReact = null;
   let grayRing = [], bodyNow = null, bodyShown = 0;
   let diamBuf = [], scaleAtStart = null;
@@ -682,6 +690,7 @@ class BenchJudge {
     $('scale').value = settings.scale;
     $('plateCm').value = settings.plateCm;
     $('travelCm').value = settings.travelCm;
+    $('fps').value = String(settings.fps);
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
     $('delayNote').textContent = 'Start comes after ' + settings.startHold.toFixed(1) + ' s of stillness' +
@@ -706,6 +715,7 @@ class BenchJudge {
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
   bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
+  $('fps').addEventListener('change', (e) => { settings.fps = Number(e.target.value); applySettings(); if (stream) startCamera(); });
   bind('tempoOn', 'tempoOn', (el) => el.checked);
   bind('tEcc', 'tEcc', (el) => Number(el.value));
   bind('tPause', 'tPause', (el) => Number(el.value));
@@ -1093,37 +1103,73 @@ class BenchJudge {
     }
     return { h, s: mx ? dl / mx : 0, v: mx / 255 };
   }
+  // TRACKER START
+  // Mark the pixels that match the tracked colour, split them into connected blobs, and follow the
+  // biggest blob near where the plate was last seen. Stray matches elsewhere (a shirt, rack paint,
+  // sensor speckle) no longer pull the crosshair around.
+  let maskBuf = null, labelBuf = null, stackBuf = null;
   function track(d, w, h) {
     const tol = settings.tol, hueTol = 8 + tol * 3, rgbTol = 18 + tol * 7;
     const useHue = target.s >= 0.28 && target.v >= 0.15;
     const sMin = Math.max(0.2, target.s * 0.45), vMin = target.v * 0.35;
+    if (!maskBuf || maskBuf.length !== w * h) { maskBuf = new Uint8Array(w * h); labelBuf = new Int32Array(w * h); stackBuf = new Int32Array(w * h); }
     const scan = (x0, y0, x1, y1) => {
-      let sx = 0, sy = 0, sxx = 0, syy = 0, n = 0;
+      const mask = maskBuf, lab = labelBuf, stack = stackBuf;
       for (let y = y0; y < y1; y++) {
-        let i = (y * w + x0) * 4;
-        for (let x = x0; x < x1; x++, i += 4) {
+        let i = (y * w + x0) * 4, k = y * w + x0;
+        for (let x = x0; x < x1; x++, i += 4, k++) {
+          lab[k] = 0;
           const r = d[i], g = d[i + 1], b = d[i + 2];
-          let ok;
+          let ok = false;
           if (useHue) {
             const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-            if (mx / 255 < vMin || !mx || (mx - mn) / mx < sMin) continue;
-            const dl = mx - mn;
-            let hh = mx === r ? ((g - b) / dl) % 6 : mx === g ? (b - r) / dl + 2 : (r - g) / dl + 4;
-            hh *= 60; if (hh < 0) hh += 360;
-            let dh = Math.abs(hh - target.h); if (dh > 180) dh = 360 - dh;
-            ok = dh <= hueTol;
+            if (mx && mx / 255 >= vMin && (mx - mn) / mx >= sMin) {
+              const dl = mx - mn;
+              let hh = mx === r ? ((g - b) / dl) % 6 : mx === g ? (b - r) / dl + 2 : (r - g) / dl + 4;
+              hh *= 60; if (hh < 0) hh += 360;
+              let dh = Math.abs(hh - target.h); if (dh > 180) dh = 360 - dh;
+              ok = dh <= hueTol;
+            }
           } else {
             const dr = r - target.r, dg = g - target.g, db = b - target.b;
             ok = dr * dr + dg * dg + db * db <= rgbTol * rgbTol;
           }
-          if (ok) { sx += x; sy += y; sxx += x * x; syy += y * y; n++; }
+          mask[k] = ok ? 1 : 0;
         }
       }
-      if (n < MIN_N) return null;
-      const mx = sx / n, my = sy / n;
-      const vx = Math.max(0, sxx / n - mx * mx), vy = Math.max(0, syy / n - my * my);
-      // a filled disc of radius r has variance r²/4 on each axis, so diameter = 4·sqrt(variance)
-      return { x: mx + 0.5, y: my + 0.5, n, diam: 4 * Math.sqrt((vx + vy) / 2) };
+      const near = lastPx && !lost ? lastPx : null, reach = h * 0.12;
+      let best = null, bestScore = -1, label = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const k0 = y * w + x;
+          if (!mask[k0] || lab[k0]) continue;
+          label++; let sp = 0; stack[sp++] = k0; lab[k0] = label;
+          let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0;
+          while (sp) {
+            const k = stack[--sp], px = k % w, py = (k - px) / w;
+            n++; sx += px; sy += py; sxx += px * px; syy += py * py;
+            for (let dy = -1; dy <= 1; dy++) {
+              const yy = py + dy; if (yy < y0 || yy >= y1) continue;
+              for (let dx = -1; dx <= 1; dx++) {
+                const xx = px + dx; if ((!dx && !dy) || xx < x0 || xx >= x1) continue;
+                const kk = yy * w + xx;
+                if (mask[kk] && !lab[kk]) { lab[kk] = label; stack[sp++] = kk; }
+              }
+            }
+          }
+          if (n < MIN_N) continue;
+          const mx = sx / n, my = sy / n;
+          const dist = near ? Math.hypot(mx + 0.5 - near.x, my + 0.5 - near.y) : 0;
+          const score = n / (1 + (dist / reach) * (dist / reach));
+          if (score > bestScore) {
+            bestScore = score;
+            const vx = Math.max(0, sxx / n - mx * mx), vy = Math.max(0, syy / n - my * my);
+            // a filled disc of radius r has variance r²/4 on each axis, so diameter = 4·sqrt(variance)
+            best = { x: mx + 0.5, y: my + 0.5, n, diam: 4 * Math.sqrt((vx + vy) / 2) };
+          }
+        }
+      }
+      return best;
     };
     let box = [0, 0, w, h];
     if (lastPx && !lost) {
@@ -1134,6 +1180,26 @@ class BenchJudge {
     if (!hit && (box[0] > 0 || box[1] > 0 || box[2] < w || box[3] < h)) hit = scan(0, 0, w, h);
     return hit;
   }
+  // One-euro filter: heavy smoothing while the bar is still (kills jitter), light smoothing while it
+  // moves (keeps the speed numbers honest).
+  function oneEuro(minCutoff, beta, dCutoff) {
+    let prev = null, dPrev = 0, tPrev = 0;
+    const alpha = (fc, dt) => 1 / (1 + 1 / (2 * Math.PI * fc * dt));
+    return {
+      reset() { prev = null; },
+      filter(x, t) {
+        if (prev === null) { prev = x; dPrev = 0; tPrev = t; return x; }
+        const dt = Math.max(0.001, (t - tPrev) / 1000); tPrev = t;
+        const dx = (x - prev) / dt, ad = alpha(dCutoff, dt);
+        dPrev = ad * dx + (1 - ad) * dPrev;
+        const a = alpha(minCutoff + beta * Math.abs(dPrev), dt);
+        prev = a * x + (1 - a) * prev;
+        return prev;
+      }
+    };
+  }
+  // TRACKER END
+  const fx = oneEuro(1.5, 12, 1.0), fy = oneEuro(1.5, 12, 1.0);
   // Share of the frame that changed over ~130 ms (2×2-averaged greyscale), for the feet and hips check.
   // Compared by time, not frame count, so it reads the same at 30 or 60 fps.
   function bodyMotion(d, t) {
@@ -1177,7 +1243,7 @@ class BenchJudge {
     if (!n) return;
     R /= n; G /= n; B /= n;
     target = { r: R, g: G, b: B, ...hsv(R, G, B) };
-    lastPx = { x: px, y: py }; smooth = null; lost = false; judge.learnedRom = null; diamBuf = [];
+    lastPx = { x: px, y: py }; fx.reset(); fy.reset(); lost = false; judge.learnedRom = null; diamBuf = [];
     $('swatch').style.background = 'rgb(' + Math.round(R) + ',' + Math.round(G) + ',' + Math.round(B) + ')';
     $('armBtn').disabled = false; $('relockBtn').disabled = false;
     unlockAudio();
@@ -1266,7 +1332,7 @@ class BenchJudge {
     const el = $('fpsNote');
     if (!frameDt) { el.textContent = ''; return; }
     const fps = Math.round(1000 / frameDt);
-    el.textContent = 'Camera running at ' + fps + ' fps' + (fps >= 50 ? '.' : '. This phone or browser won\'t give 60 fps here, so fast reps are less precise.');
+    el.textContent = 'Camera running at ' + fps + ' fps' + (fps >= 50 || Number(settings.fps) === 30 ? '.' : '. This phone or browser won\'t give 60 fps here, so fast reps are less precise.');
   }
   function startLoop() {
     const id = ++loopId;
@@ -1284,18 +1350,18 @@ class BenchJudge {
       if (++fpsTimer % 30 === 0) showFps();
       let p = null;
       {
-        pctx.drawImage(video, 0, 0, procW, procH);
+        // Shrink in two smoothed steps; one big jump samples too few pixels and adds speckle.
+        mctx.drawImage(video, 0, 0, mid.width, mid.height);
+        pctx.drawImage(mid, 0, 0, procW, procH);
         frame = pctx.getImageData(0, 0, procW, procH);
         bodyNow = bodyMotion(frame.data, now);
         if (target) {
           const hit = track(frame.data, procW, procH);
           const wasLost = lost;
           if (hit) {
-            if (lost && now - lostSince > 300) smooth = null;
+            if (lost && now - lostSince > 300) { fx.reset(); fy.reset(); }
             lastPx = hit; lost = false;
-            const nx = hit.x / procH, ny = hit.y / procH;
-            smooth = smooth ? { x: smooth.x + 0.55 * (nx - smooth.x), y: smooth.y + 0.55 * (ny - smooth.y) } : { x: nx, y: ny };
-            p = { x: smooth.x, y: smooth.y, m: bodyNow };
+            p = { x: fx.filter(hit.x / procH, now), y: fy.filter(hit.y / procH, now), m: bodyNow };
             if (hit.n >= 30) { diamBuf.push(hit.diam / procH); if (diamBuf.length > 90) diamBuf.shift(); }
           } else if (!lost) { lost = true; lostSince = now; }
           if (wasLost !== lost) refreshStatus();
@@ -1322,12 +1388,15 @@ class BenchJudge {
     try {
       if (stream) stream.getTracks().forEach((t) => t.stop());
       stream = null;
-      // Ask for 60 fps first (many phones only offer it at 720p); fall back to whatever the camera gives.
-      const tries = [
-        { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 50 } },
-        { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 50 } },
-        { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }
-      ];
+      // 60 fps: ask for it first (many phones only offer it at 720p), fall back to whatever the camera gives.
+      // 30 fps: steadier under flickering gym lights.
+      const tries = Number(settings.fps) === 30
+        ? [{ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, { width: { ideal: 640 }, height: { ideal: 480 } }]
+        : [
+            { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 50 } },
+            { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 50 } },
+            { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }
+          ];
       let s = null, lastErr = null;
       for (const v of tries) {
         try { s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, ...v } }); break; }
@@ -1338,12 +1407,14 @@ class BenchJudge {
       mediaOffset = null; lastFrameT = null; lastVidTime = -1; frameDt = null; showFps();
       await video.play();
       const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
-      if (vw >= vh) { procW = 160; procH = Math.max(60, Math.round(160 * vh / vw)); } else { procH = 160; procW = Math.max(60, Math.round(160 * vw / vh)); }
+      const P = 240; // processing size (long side): finer than before, so the centre of the plate is steadier
+      if (vw >= vh) { procW = P; procH = Math.max(90, Math.round(P * vh / vw)); } else { procH = P; procW = Math.max(90, Math.round(P * vw / vh)); }
       procW -= procW % 2; procH -= procH % 2;
-      proc.width = procW; proc.height = procH;
+      proc.width = procW; proc.height = procH; mid.width = procW * 2; mid.height = procH * 2;
+      for (const c of [pctx, mctx]) { c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; }
       $('viewport').style.aspectRatio = vw + ' / ' + vh;
       $('placeholder').hidden = true; $('flipBtn').disabled = false;
-      lastPx = null; smooth = null; grayRing = []; diamBuf = [];
+      lastPx = null; fx.reset(); fy.reset(); grayRing = []; diamBuf = [];
       refreshStatus(); startLoop();
     } catch (err) {
       stream = null;
@@ -1356,7 +1427,7 @@ class BenchJudge {
   $('camBtn').addEventListener('click', () => { unlockAudio(); startCamera(); });
   $('flipBtn').addEventListener('click', () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); });
   $('relockBtn').addEventListener('click', () => {
-    target = null; lastPx = null; smooth = null; lost = true; judge.learnedRom = null; diamBuf = [];
+    target = null; lastPx = null; fx.reset(); fy.reset(); lost = true; judge.learnedRom = null; diamBuf = [];
     if (judge.phase !== 'idle') setArmed(false);
     $('swatch').style.background = ''; $('armBtn').disabled = true; $('relockBtn').disabled = true;
     refreshStatus();
