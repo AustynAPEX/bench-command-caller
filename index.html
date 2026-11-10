@@ -3,28 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0f151c">
-<title>Bench Command Caller</title>
+<meta name="theme-color" content="#0b0b0b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Bench Caller">
+<title>Apex Command Caller</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Nunito+Sans:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
-/* Layout: camera stage first (it is what the lifter glances at), controls and the rep log below; two columns on wide screens. */
+/* Layout: camera stage first (what the lifter glances at from the bench), controls and rep log below; two columns on wide screens.
+   Brand: Apex Power & Performance — monochrome like the panther logo, wide all-caps display type like the website. */
 :root {
   color-scheme: dark;
-  --ground: #0f151c;
-  --panel: #17202a;
-  --panel-2: #1d2833;
-  --line: #2a3746;
-  --ink: #e9eef3;
-  --muted: #8e9cad;
-  --steel: #82b4e6;
-  --steel-ink: #0d1a27;
-  --white: #f5f8fb;
+  --ground: #0b0b0b;
+  --panel: #151515;
+  --panel-2: #1e1e1e;
+  --line: #2d2d2d;
+  --ink: #f1f0ec;
+  --muted: #9a9995;
+  --brand: #f1f0ec;
+  --brand-ink: #0b0b0b;
+  --white: #f7f7f5;
   --red: #ec5257;
   --amber: #e6a53c;
-  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
-  --body: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Syncopate", "Arial Black", "Helvetica Neue", system-ui, sans-serif;
+  --body: "Nunito Sans", "Avenir Next", Avenir, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
@@ -39,28 +47,32 @@ body {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   -webkit-text-size-adjust: 100%;
 }
+/* Film grain, after the logo's printed texture */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
 [hidden] { display: none !important; }
 button, input, select { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 
-.app { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+.app { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
 @media (min-width: 860px) {
   .app { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
-  .top, .stage { grid-column: 1; }
-  .side { grid-column: 2; grid-row: 1 / span 2; }
+  .top, .stage, .foot { grid-column: 1; }
+  .side { grid-column: 2; grid-row: 1 / span 3; }
 }
 
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-h1 {
-  margin: 0; font: 700 26px/1 var(--display); letter-spacing: 0.02em; text-transform: uppercase;
-  text-wrap: balance;
-}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand img { width: 46px; height: 46px; border-radius: 50%; flex: none; }
+.brand .kicker { display: block; font: 700 9.5px/1.2 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 2px 0 0; font: 700 17px/1.15 var(--display); letter-spacing: 0.04em; text-transform: uppercase; text-wrap: balance; }
 .chip {
-  font: 600 13px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase;
-  padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font: 700 10px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
 }
-.chip.live { color: var(--steel-ink); background: var(--steel); border-color: var(--steel); }
+.chip.live { color: var(--brand-ink); background: var(--brand); border-color: var(--brand); }
 .chip.warn { color: var(--ground); background: var(--amber); border-color: var(--amber); }
 
 .stage { display: grid; gap: 12px; min-width: 0; }
@@ -73,45 +85,61 @@ h1 {
 .viewport canvas { touch-action: manipulation; cursor: crosshair; }
 .placeholder {
   position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px;
-  padding: 20px; text-align: center; color: var(--muted);
+  padding: 18px; text-align: center; color: var(--muted); background: var(--ground);
 }
+.placeholder img { width: min(340px, 82%); height: auto; }
 .placeholder p { margin: 0; max-width: 34ch; }
 .placeholder .err { color: var(--red); }
 
 .call {
-  position: absolute; left: 0; right: 0; bottom: 6%; text-align: center; pointer-events: none;
-  font: 700 clamp(56px, 17vw, 132px)/0.9 var(--display); letter-spacing: 0.03em; text-transform: uppercase;
-  color: var(--white); text-shadow: 0 2px 18px rgba(0,0,0,0.75);
+  position: absolute; left: 0; right: 0; bottom: 7%; text-align: center; pointer-events: none;
+  font: 700 clamp(40px, 12.5vw, 104px)/1 var(--display); letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--white); text-shadow: 0 2px 18px rgba(0,0,0,0.8);
   opacity: 0; transform: scale(0.96); transition: opacity 120ms ease, transform 120ms ease;
 }
 .call.on { opacity: 1; transform: scale(1); }
-.call.bad { color: var(--red); font-size: clamp(40px, 11vw, 88px); }
+.call.bad { color: var(--red); font-size: clamp(24px, 6.6vw, 58px); }
+.speedTag {
+  position: absolute; top: 10px; left: 10px; pointer-events: none;
+  background: rgba(11,11,11,0.72); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  display: grid; gap: 1px;
+}
+.speedTag b { font: 700 clamp(22px, 6vw, 34px)/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--white); }
+.speedTag b small { font-size: 0.5em; font-weight: 500; color: var(--muted); }
+.speedTag span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .status {
-  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 14px; padding: 12px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
 }
-.lights { display: flex; gap: 8px; flex: none; }
+.lights { display: flex; gap: 8px; }
 .lights span { width: 22px; height: 22px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); }
-.lights.white span { background: var(--white); border-color: var(--white); box-shadow: 0 0 14px rgba(245,248,251,0.45); }
+.lights.white span { background: var(--white); border-color: var(--white); box-shadow: 0 0 14px rgba(247,247,245,0.45); }
 .lights.red span { background: var(--red); border-color: var(--red); box-shadow: 0 0 14px rgba(236,82,87,0.45); }
 .status p { margin: 0; min-width: 0; }
+.meter { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.meter .label { font: 700 9.5px/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.meter .track { position: relative; height: 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--white); transition: width 90ms linear; }
+.meter .fill.moving { background: var(--amber); }
+.meter .mark { position: absolute; top: -1px; bottom: -1px; left: 50%; width: 2px; background: var(--muted); }
+.meter .state { min-width: 7ch; text-align: right; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .btn {
   appearance: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
-  border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600;
+  border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 700;
 }
-.btn:hover:not(:disabled) { border-color: var(--steel); }
+.btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { background: var(--steel); border-color: var(--steel); color: var(--steel-ink); }
-.btn.big { font: 700 20px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; padding: 14px 26px; }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.btn.big { font: 700 15px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; padding: 15px 24px; }
 .btn.armed { background: var(--amber); border-color: var(--amber); color: var(--ground); }
 .swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; vertical-align: -4px; }
 
 .side { display: grid; gap: 16px; min-width: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 12px; min-width: 0; }
-.card h2 { margin: 0; font: 700 15px/1.2 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.card h2 { margin: 0; font: 700 11px/1.2 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field { display: grid; gap: 4px; min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
@@ -120,36 +148,46 @@ h1 {
   width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   font-family: var(--mono); font-variant-numeric: tabular-nums;
 }
-.field input[type=range] { width: 100%; accent-color: var(--steel); }
+.field select { font-family: var(--body); }
+.field input[type=range] { width: 100%; accent-color: var(--white); }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.check input { accent-color: var(--steel); width: 18px; height: 18px; }
+.check input { accent-color: var(--white); width: 18px; height: 18px; }
 .note { margin: 0; font-size: 13px; color: var(--muted); }
 
 ol.setup { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
-ol.setup li { padding-left: 2px; }
 
 .trace { width: 100%; height: 96px; display: block; }
 
 .logwrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { font: 600 12px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+th { font: 700 9px/1.2 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 td.num { font-family: var(--mono); font-size: 13px; }
 tr.example td { color: var(--muted); font-style: italic; }
-.pill { font: 600 12px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; }
+tr.setbreak td { border-top: 2px solid var(--line); }
+.pill { font: 700 9px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; }
 .pill.good { background: var(--white); color: var(--ground); }
 .pill.bad { background: var(--red); color: var(--white); }
 .pill.miss { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
 .summary { margin: 0; font-size: 14px; color: var(--muted); }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-@media (prefers-reduced-motion: reduce) { .call { transition: none; } }
+.foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); padding-top: 4px; }
+.foot a { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) { .call, .meter .fill { transition: none; } }
 </style>
 </head>
 <body>
 <main class="app">
   <header class="top">
-    <h1>Bench Command Caller</h1>
+    <div class="brand">
+      <img src="badge.png" alt="Apex Power &amp; Performance panther" width="46" height="46">
+      <div>
+        <span class="kicker">Apex Power &amp; Performance</span>
+        <h1>Bench Command Caller</h1>
+      </div>
+    </div>
     <span class="chip" id="phaseChip">Camera off</span>
   </header>
 
@@ -157,7 +195,9 @@ tr.example td { color: var(--muted); font-style: italic; }
     <div class="viewport" id="viewport">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="overlay" aria-label="Camera view. Tap the plate to lock tracking."></canvas>
+      <div class="speedTag" id="speedTag" hidden aria-live="polite"><b id="speedBig">0.00 <small>m/s</small></b><span id="speedSub"></span></div>
       <div class="placeholder" id="placeholder">
+        <img src="logo.jpg" alt="Apex Power &amp; Performance" width="760" height="424">
         <p>Prop your phone beside the bench, side-on, with the whole bar path in frame.</p>
         <button class="btn primary big" id="camBtn" type="button">Start camera</button>
         <p class="err" id="camErr" hidden></p>
@@ -167,6 +207,11 @@ tr.example td { color: var(--muted); font-style: italic; }
     <div class="status">
       <div class="lights" id="lights" aria-label="Last lift result"><span></span><span></span><span></span></div>
       <p id="hint">Start the camera to begin.</p>
+      <div class="meter" id="bodyMeter">
+        <span class="label">Body</span>
+        <div class="track" aria-hidden="true"><div class="fill" id="bodyFill"></div><div class="mark"></div></div>
+        <span class="state" id="bodyState">–</span>
+      </div>
     </div>
     <div class="actions">
       <button class="btn primary big" id="armBtn" type="button" disabled>Arm</button>
@@ -180,10 +225,10 @@ tr.example td { color: var(--muted); font-style: italic; }
     <section class="card" aria-labelledby="setupTitle">
       <h2 id="setupTitle">Setup</h2>
       <ol class="setup">
-        <li>Prop the phone side-on to the bench so the bar's full path stays in frame.</li>
-        <li>Tap a plate on screen to lock tracking <span class="swatch" id="swatch" title="Tracked colour"></span>. Bright coloured plates track best. With black plates, put a strip of coloured tape on the collar or plate edge.</li>
-        <li>Tap Arm, lie down and unrack. You'll hear "Start" once the bar is still at lockout, "Press" after it stops on your chest, and "Rack" when you lock it out.</li>
-        <li>Press before the call and you get red lights and a buzzer.</li>
+        <li>Prop the phone side-on to the bench so the bar's full path, your hips and your feet stay in frame.</li>
+        <li>Tap a plate on screen to lock tracking <span class="swatch" id="swatch" title="Tracked colour"></span>. Bright coloured plates track best. With black plates, put a strip of coloured tape on the plate edge.</li>
+        <li>Tap Arm, lie down and unrack. "Start" comes once the bar, your feet and hips have been still for the hold time. In rep work you get a "Start" before every rep.</li>
+        <li>"Press" comes a random time after the bar stops on your chest. "Rack" comes at lockout on your last rep. Press early and you get red lights and a buzzer.</li>
       </ol>
     </section>
 
@@ -191,36 +236,72 @@ tr.example td { color: var(--muted); font-style: italic; }
       <h2 id="settingsTitle">Commands</h2>
       <div class="fields">
         <div class="field">
-          <label for="minDelay">Pause from (s)</label>
+          <label for="minDelay">Press pause from (s)</label>
           <input type="number" id="minDelay" min="0.2" max="5" step="0.1" inputmode="decimal">
         </div>
         <div class="field">
-          <label for="maxDelay">Pause to (s)</label>
+          <label for="maxDelay">Press pause to (s)</label>
           <input type="number" id="maxDelay" min="0.2" max="6" step="0.1" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label for="startHold">Still before Start (s)</label>
+          <input type="number" id="startHold" min="0.3" max="4" step="0.1" inputmode="decimal">
         </div>
         <div class="field">
           <label for="reps">Reps per set</label>
           <select id="reps">
             <option value="1">1</option><option value="2">2</option><option value="3">3</option>
-            <option value="4">4</option><option value="5">5</option>
+            <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+            <option value="8">8</option><option value="10">10</option>
           </select>
         </div>
         <div class="field">
-          <label for="still">Motionless test</label>
+          <label for="body">Feet and hips check</label>
+          <select id="body">
+            <option value="off">Off</option>
+            <option value="strict">Strict</option>
+            <option value="normal">Normal</option>
+            <option value="loose">Loose</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="still">Bar motionless test</label>
           <select id="still">
             <option value="strict">Strict</option>
             <option value="normal">Normal</option>
             <option value="loose">Loose</option>
           </select>
         </div>
-        <div class="field wide">
-          <label for="tol">Colour match <span id="tolOut"></span></label>
-          <input type="range" id="tol" min="1" max="10" step="1">
-        </div>
         <label class="check field wide" for="voiceOn"><input type="checkbox" id="voiceOn"> Speak the commands (off = beeps)</label>
         <label class="check field wide" for="buzzOn"><input type="checkbox" id="buzzOn"> Buzzer on an early press</label>
       </div>
       <p class="note" id="delayNote"></p>
+    </section>
+
+    <section class="card" aria-labelledby="speedTitle">
+      <h2 id="speedTitle">Tracking and speed</h2>
+      <div class="fields">
+        <div class="field wide">
+          <label for="tol">Colour match <span id="tolOut"></span></label>
+          <input type="range" id="tol" min="1" max="10" step="1">
+        </div>
+        <div class="field">
+          <label for="scale">Speed scale</label>
+          <select id="scale">
+            <option value="plate">Plate size</option>
+            <option value="travel">Bar travel</option>
+          </select>
+        </div>
+        <div class="field" id="plateField">
+          <label for="plateCm">Plate diameter (cm)</label>
+          <input type="number" id="plateCm" min="20" max="60" step="0.5" inputmode="decimal">
+        </div>
+        <div class="field" id="travelField" hidden>
+          <label for="travelCm">Chest to lockout (cm)</label>
+          <input type="number" id="travelCm" min="10" max="80" step="0.5" inputmode="decimal">
+        </div>
+      </div>
+      <p class="note" id="scaleNote"></p>
     </section>
 
     <section class="card" aria-labelledby="traceTitle">
@@ -233,33 +314,40 @@ tr.example td { color: var(--muted); font-style: italic; }
         <h2 id="logTitle">Reps</h2>
         <button class="btn" id="clearLog" type="button">Clear</button>
       </div>
-      <p class="summary" id="summary">Response is the time from the press call to the bar moving up.</p>
+      <p class="summary" id="summary">Response is the time from the press call to the bar moving up. Speed is mean concentric velocity.</p>
       <div class="logwrap">
         <table>
-          <thead><tr><th>#</th><th>Pause</th><th>Response</th><th>Result</th></tr></thead>
+          <thead><tr><th>Set·Rep</th><th>Pause</th><th>Response</th><th>m/s</th><th>Peak</th><th>Result</th></tr></thead>
           <tbody id="logBody">
-            <tr class="example"><td>Example</td><td class="num">1.42 s</td><td class="num">268 ms</td><td><span class="pill good">Good lift</span></td></tr>
-            <tr class="example"><td>Example</td><td class="num">0.51 s</td><td class="num">–</td><td><span class="pill bad">Early press</span></td></tr>
+            <tr class="example"><td>Example</td><td class="num">1.42 s</td><td class="num">268 ms</td><td class="num">0.38</td><td class="num">0.61</td><td><span class="pill good">Good lift</span></td></tr>
+            <tr class="example"><td>Example</td><td class="num">0.51 s</td><td class="num">–</td><td class="num">0.41</td><td class="num">0.66</td><td><span class="pill bad">Early press</span></td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </div>
+
+  <footer class="foot">
+    <span>Apex Power &amp; Performance</span>
+    <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
+  </footer>
 </main>
 
 <script>
 // ENGINE START
-// Pure judging logic: feed it (time ms, bar position) samples, it returns events.
+// Pure judging logic: feed it (time ms, bar position, body motion) samples, it returns events.
 // Positions are normalised by frame height, so thresholds are fractions of the frame.
 class BenchJudge {
   constructor(cfg = {}) {
     this.cfg = Object.assign({
       minDelay: 0.6, maxDelay: 2.0, reps: 1,
       stillTol: 0.010,   // bar counts as motionless if it stays inside this box
-      moveTol: 0.04,     // movement that counts as an unrack / rerack
+      moveTol: 0.04,     // travel that counts as an unrack / rerack
       minRom: 0.07,      // minimum travel from lockout before a stop counts as the chest
-      earlyTol: 0.02,    // upward movement that counts as pressing
-      startHold: 500, chestHold: 200, lockHold: 300, restHold: 2500, missAfter: 8000,
+      earlyTol: 0.02,    // upward travel that counts as pressing
+      startHold: 1000,   // bar (and body) still this long before Start
+      bodyCheck: true, bodyTol: 0.008, // share of the frame allowed to change while "still"
+      chestHold: 200, lockHold: 300, restHold: 2500, missAfter: 8000,
       rand: Math.random
     }, cfg);
     this.learnedRom = null;
@@ -268,9 +356,9 @@ class BenchJudge {
   }
   set(cfg) { Object.assign(this.cfg, cfg); }
   reset() {
-    this.hist = []; this.top = null; this.touchT = 0; this.touchDist = 0; this.pressAt = 0;
+    this.hist = []; this.top = null; this.ref = null; this.touchT = 0; this.touchDist = 0; this.pressAt = 0;
     this.pressT = null; this.riseT = null; this.early = false; this.repInSet = 0; this.moved = false; this.delay = 0;
-    this.ref = null;
+    this.con = [];
   }
   arm() { this.reset(); this.phase = 'armed'; return [{ type: 'phase', phase: 'armed' }]; }
   disarm() { this.reset(); this.phase = 'idle'; return [{ type: 'phase', phase: 'idle' }]; }
@@ -293,6 +381,33 @@ class BenchJudge {
     for (let i = h.length - 1; i >= 0 && h[i].t >= t - hold; i--) n++;
     return n >= 3 && this.span(t, hold) <= this.cfg.stillTol;
   }
+  bodyStill(t, hold) {
+    if (!this.cfg.bodyCheck) return true;
+    for (let i = this.hist.length - 1; i >= 0 && this.hist[i].t >= t - hold; i--) {
+      const m = this.hist[i].m;
+      if (m != null && m > this.cfg.bodyTol) return false;
+    }
+    return true;
+  }
+  speed() {
+    // Mean and peak concentric velocity (frame units per second) from the samples since the touch.
+    const s = this.con, rom = this.touchDist;
+    if (s.length < 4 || !rom) return null;
+    let end = Infinity; for (const q of s) if (q.d < end) end = q.d;
+    const total = rom - end;
+    if (total <= 0) return null;
+    const i0 = s.findIndex((q) => rom - q.d > 0.02 * total);
+    const i1 = s.findIndex((q) => rom - q.d >= 0.97 * total);
+    if (i0 < 0 || i1 <= i0) return null;
+    const dt = (s[i1].t - s[i0].t) / 1000;
+    if (dt <= 0) return null;
+    let peak = 0;
+    for (let k = i0 + 1; k <= i1; k++) {
+      const j = Math.max(i0, k - 5), v = (s[j].d - s[k].d) / ((s[k].t - s[j].t) / 1000);
+      if (v > peak) peak = v;
+    }
+    return { rom: total, mean: (0.95 * total) / dt, peak, conMs: dt * 1000 };
+  }
   update(t, p) {
     const ev = [], c = this.cfg;
     const go = (phase) => { this.phase = phase; ev.push({ type: 'phase', phase, t }); };
@@ -305,19 +420,20 @@ class BenchJudge {
       }
       return ev;
     }
-    this.hist.push({ t, x: p.x, y: p.y });
-    while (this.hist.length && this.hist[0].t < t - 4000) this.hist.shift();
+    this.hist.push({ t, x: p.x, y: p.y, m: p.m });
+    while (this.hist.length && this.hist[0].t < t - 5000) this.hist.shift();
     const d = this.dist(p);
     switch (this.phase) {
       case 'armed':
         // Bar sits in the rack; any real travel away from that spot is the unrack.
         if (!this.ref) this.ref = { x: p.x, y: p.y };
-        if (Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) go('unrack');
+        if (Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) go('settle');
         break;
-      case 'unrack':
-        if (this.still(t, c.startHold)) {
-          this.top = { x: p.x, y: p.y }; this.repInSet = 0;
-          ev.push({ type: 'call', word: 'Start', t }); go('descent');
+      case 'settle':
+        // Start only once the bar has been still at lockout, and feet and hips too, for the hold time.
+        if (this.still(t, c.startHold) && this.bodyStill(t, c.startHold)) {
+          this.top = { x: p.x, y: p.y }; this.pressT = null; this.riseT = null; this.early = false;
+          ev.push({ type: 'call', word: 'Start', t, rep: this.repInSet + 1 }); go('descent');
         }
         break;
       case 'descent': {
@@ -326,11 +442,13 @@ class BenchJudge {
           this.touchT = t - c.chestHold; this.touchDist = d;
           this.delay = c.minDelay + c.rand() * (c.maxDelay - c.minDelay);
           this.pressAt = this.touchT + this.delay * 1000;
+          this.con = [{ t, d }];
           ev.push({ type: 'touch', t, delay: this.delay }); go('paused');
         }
         break;
       }
       case 'paused':
+        this.con.push({ t, d });
         if (d < this.touchDist - c.earlyTol) {
           this.early = true; this.pressT = null; this.riseT = t;
           ev.push({ type: 'fault', reason: 'early', t, pauseMs: t - this.touchT }); go('pressing');
@@ -342,15 +460,16 @@ class BenchJudge {
         }
         break;
       case 'pressing': {
+        this.con.push({ t, d });
         if (this.riseT === null && d < this.touchDist - c.earlyTol) {
           this.riseT = t; ev.push({ type: 'rise', t, reactMs: t - this.pressT });
         }
         const since = this.pressT !== null ? this.pressT : this.riseT;
         if (this.riseT !== null && d < this.touchDist * 0.35 && this.still(t, c.lockHold)) {
           this.learnedRom = this.touchDist;
-          this.finishRep(t, this.early ? 'early' : 'good', ev, p, go);
+          this.finishRep(t, this.early ? 'early' : 'good', ev, go);
         } else if (t - since > c.missAfter) {
-          this.finishRep(t, 'missed', ev, p, go);
+          this.finishRep(t, 'missed', ev, go);
         }
         break;
       }
@@ -358,21 +477,22 @@ class BenchJudge {
         // Wait for the rerack (travel away from lockout), then for the bar to sit still in the rack.
         if (!this.ref) this.ref = { x: p.x, y: p.y };
         if (!this.moved && Math.hypot(p.x - this.ref.x, p.y - this.ref.y) > c.moveTol) this.moved = true;
-        if (this.moved && this.still(t, c.restHold)) { this.hist = []; this.ref = null; go('armed'); }
+        if (this.moved && this.still(t, c.restHold)) { this.hist = []; this.ref = null; this.repInSet = 0; go('armed'); }
         break;
     }
     return ev;
   }
-  finishRep(t, result, ev, p, go) {
+  finishRep(t, result, ev, go) {
     this.repInSet++;
     ev.push({
-      type: 'rep', t, n: this.repInSet, result, delay: this.delay,
+      type: 'rep', t, n: this.repInSet, of: this.cfg.reps, result, delay: this.delay,
       pauseMs: result === 'early' ? this.riseT - this.touchT : (this.pressT !== null ? this.pressT - this.touchT : null),
-      reactMs: result === 'good' && this.riseT !== null ? this.riseT - this.pressT : null
+      reactMs: result === 'good' && this.riseT !== null ? this.riseT - this.pressT : null,
+      speed: result === 'missed' ? null : this.speed()
     });
     this.early = false;
     if (result !== 'missed' && this.repInSet < this.cfg.reps) {
-      this.top = { x: p.x, y: p.y }; this.pressT = null; this.riseT = null; go('descent');
+      go('settle'); // next rep gets its own Start once everything is still again
     } else {
       ev.push({ type: 'call', word: 'Rack', t }); this.moved = false; this.ref = null; go('rest');
     }
@@ -388,10 +508,11 @@ class BenchJudge {
   const traceCv = $('trace'), tctx = traceCv.getContext('2d');
   const css = getComputedStyle(document.documentElement);
   const C = (n) => css.getPropertyValue(n).trim();
-  const COL = { steel: C('--steel'), white: C('--white'), red: C('--red'), amber: C('--amber'), line: C('--line'), muted: C('--muted') };
+  const COL = { white: C('--white'), red: C('--red'), amber: C('--amber'), line: C('--line'), muted: C('--muted') };
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, reps: 1, still: 'normal', tol: 4, voice: true, buzz: true };
+  const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voice: true, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try { settings = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch (e) {}
@@ -402,32 +523,61 @@ class BenchJudge {
   let procW = 160, procH = 120, frame = null;
   let target = null, lastPx = null, smooth = null, lost = true, lostSince = 0;
   let pressSpokenAt = null, lastReact = null;
+  let grayRing = [], bodyNow = null, bodyShown = 0;
+  let diamBuf = [], scaleAtStart = null;
   const trace = [], marks = [];
   const MIN_N = 8;
+  const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
+  const r1 = (v) => Math.round(v * 10) / 10;
 
   // ---------- settings ----------
   function applySettings() {
-    let lo = Math.min(5, Math.max(0.2, Number(settings.minDelay) || DEFAULTS.minDelay));
-    let hi = Math.min(6, Math.max(lo, Number(settings.maxDelay) || DEFAULTS.maxDelay));
-    settings.minDelay = Math.round(lo * 10) / 10; settings.maxDelay = Math.round(hi * 10) / 10;
-    judge.set({ minDelay: settings.minDelay, maxDelay: settings.maxDelay, reps: Number(settings.reps), stillTol: STILL[settings.still] || STILL.normal });
+    settings.minDelay = r1(clamp(settings.minDelay, 0.2, 5, DEFAULTS.minDelay));
+    settings.maxDelay = r1(clamp(settings.maxDelay, settings.minDelay, 6, DEFAULTS.maxDelay));
+    settings.startHold = r1(clamp(settings.startHold, 0.3, 4, DEFAULTS.startHold));
+    settings.plateCm = clamp(settings.plateCm, 20, 60, DEFAULTS.plateCm);
+    settings.travelCm = clamp(settings.travelCm, 10, 80, DEFAULTS.travelCm);
+    judge.set({
+      minDelay: settings.minDelay, maxDelay: settings.maxDelay, reps: Number(settings.reps),
+      startHold: settings.startHold * 1000, stillTol: STILL[settings.still] || STILL.normal,
+      bodyCheck: settings.body !== 'off', bodyTol: BODY[settings.body] || BODY.normal
+    });
     $('minDelay').value = settings.minDelay.toFixed(1);
     $('maxDelay').value = settings.maxDelay.toFixed(1);
+    $('startHold').value = settings.startHold.toFixed(1);
     $('reps').value = String(settings.reps);
     $('still').value = settings.still;
+    $('body').value = settings.body;
     $('tol').value = settings.tol;
     $('tolOut').textContent = '(' + settings.tol + '/10)';
     $('voiceOn').checked = !!settings.voice;
     $('buzzOn').checked = !!settings.buzz;
-    $('delayNote').textContent = 'Press is called a random ' + settings.minDelay.toFixed(1) + '–' + settings.maxDelay.toFixed(1) + ' s after the bar stops on your chest.';
+    $('scale').value = settings.scale;
+    $('plateCm').value = settings.plateCm;
+    $('travelCm').value = settings.travelCm;
+    $('plateField').hidden = settings.scale !== 'plate';
+    $('travelField').hidden = settings.scale !== 'travel';
+    $('delayNote').textContent = 'Start comes after ' + settings.startHold.toFixed(1) + ' s of stillness' +
+      (settings.body === 'off' ? ' (bar only)' : ' (bar, feet and hips)') + '. Press comes a random ' +
+      settings.minDelay.toFixed(1) + '–' + settings.maxDelay.toFixed(1) + ' s after the bar stops on your chest.';
+    $('scaleNote').textContent = settings.scale === 'plate'
+      ? 'Speed is scaled from the tracked plate. Track a full plate face (competition and bumper plates are 45 cm). The dashed ring on screen should sit on the plate\'s edge.'
+      : 'Speed is scaled from your chest-to-lockout distance. Use this when you track tape instead of a plate.';
     save();
   }
-  ['minDelay', 'maxDelay'].forEach((id) => $(id).addEventListener('change', (e) => { settings[id] = parseFloat(e.target.value); applySettings(); }));
-  $('reps').addEventListener('change', (e) => { settings.reps = Number(e.target.value); applySettings(); });
-  $('still').addEventListener('change', (e) => { settings.still = e.target.value; applySettings(); });
-  $('tol').addEventListener('input', (e) => { settings.tol = Number(e.target.value); applySettings(); });
-  $('voiceOn').addEventListener('change', (e) => { settings.voice = e.target.checked; applySettings(); });
-  $('buzzOn').addEventListener('change', (e) => { settings.buzz = e.target.checked; applySettings(); });
+  const bind = (id, key, conv, ev) => $(id).addEventListener(ev || 'change', (e) => { settings[key] = conv(e.target); applySettings(); });
+  bind('minDelay', 'minDelay', (el) => parseFloat(el.value));
+  bind('maxDelay', 'maxDelay', (el) => parseFloat(el.value));
+  bind('startHold', 'startHold', (el) => parseFloat(el.value));
+  bind('reps', 'reps', (el) => Number(el.value));
+  bind('still', 'still', (el) => el.value);
+  bind('body', 'body', (el) => el.value);
+  bind('tol', 'tol', (el) => Number(el.value), 'input');
+  bind('voiceOn', 'voice', (el) => el.checked);
+  bind('buzzOn', 'buzz', (el) => el.checked);
+  bind('scale', 'scale', (el) => el.value);
+  bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
+  bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
   applySettings();
 
   // ---------- audio ----------
@@ -481,7 +631,7 @@ class BenchJudge {
   // ---------- UI state ----------
   const PHASE = {
     armed: ['Armed', 'Lie down and unrack when ready.'],
-    unrack: ['Unrack', 'Hold the bar still at lockout for the start call.'],
+    settle: ['Settle', 'Get set at lockout. Start comes once the bar, your feet and hips are still.'],
     descent: ['Lower', 'Lower the bar to your chest.'],
     paused: ['Pause', 'Bar is motionless. Wait for the press call.'],
     pressing: ['Press', 'Drive to lockout and hold it still.'],
@@ -491,14 +641,16 @@ class BenchJudge {
     const chip = $('phaseChip');
     chip.className = 'chip';
     if (!stream) { chip.textContent = 'Camera off'; $('hint').textContent = 'Start the camera to begin.'; return; }
-    if (!target) { chip.textContent = 'Tap plate'; $('hint').textContent = 'Tap the plate on screen (or coloured tape on the collar) to lock tracking.'; return; }
+    if (!target) { chip.textContent = 'Tap plate'; $('hint').textContent = 'Tap a plate on screen (or coloured tape on the plate) to lock tracking.'; return; }
     if (lost) { chip.textContent = 'Lost bar'; chip.classList.add('warn'); }
     if (judge.phase === 'idle') {
       if (!lost) chip.textContent = 'Locked';
       $('hint').textContent = lost ? 'Can\'t see the tracked colour. Re-frame the phone or tap the plate again.' : 'Tracking locked. Tap Arm, then lie down.';
       return;
     }
-    const [label, hint] = PHASE[judge.phase];
+    let [label, hint] = PHASE[judge.phase];
+    if (judge.phase === 'settle' && settings.body === 'off') hint = 'Get set at lockout. Start comes once the bar is still.';
+    if (judge.phase === 'settle' && judge.repInSet > 0) label = 'Rep ' + (judge.repInSet + 1);
     if (!lost) { chip.textContent = label; chip.classList.add('live'); }
     $('hint').textContent = hint;
   }
@@ -510,30 +662,80 @@ class BenchJudge {
     callTimer = setTimeout(() => el.classList.remove('on'), bad ? 1600 : 1100);
   }
   function setLights(kind) { $('lights').className = 'lights' + (kind ? ' ' + kind : ''); }
+  function drawBodyMeter() {
+    const fill = $('bodyFill'), state = $('bodyState');
+    if (settings.body === 'off') { fill.style.width = '0'; state.textContent = 'Check off'; return; }
+    if (bodyNow === null) { fill.style.width = '0'; state.textContent = '–'; return; }
+    const tol = BODY[settings.body] || BODY.normal;
+    bodyShown += 0.35 * (bodyNow - bodyShown);
+    fill.style.width = Math.min(100, (bodyShown / (tol * 2)) * 100) + '%';
+    const moving = bodyNow > tol;
+    fill.classList.toggle('moving', moving);
+    state.textContent = moving ? 'Moving' : 'Still';
+  }
+
+  // ---------- speed ----------
+  function plateScale() {
+    // metres per frame unit, from the median plate diameter seen over the last few seconds
+    if (diamBuf.length < 8) return null;
+    const s = [...diamBuf].sort((a, b) => a - b), med = s[s.length >> 1];
+    return med > 0 ? (settings.plateCm / 100) / med : null;
+  }
+  function plateMedian() {
+    if (diamBuf.length < 8) return null;
+    const s = [...diamBuf].sort((a, b) => a - b); return s[s.length >> 1];
+  }
+  function toMetres(sp) {
+    if (!sp) return null;
+    const k = settings.scale === 'travel' ? (settings.travelCm / 100) / sp.rom : (scaleAtStart || plateScale());
+    if (!k) return null;
+    return { mean: sp.mean * k, peak: sp.peak * k, romCm: sp.rom * k * 100 };
+  }
 
   // ---------- log ----------
   const reps = [];
+  let setNo = 0, setMeans = [];
   function addRep(e) {
     const body = $('logBody');
     if (!reps.length) body.innerHTML = '';
+    if (e.n === 1) { setNo++; setMeans = []; }
     const react = e.result === 'good' ? (lastReact !== null ? lastReact : e.reactMs) : null;
-    reps.push({ result: e.result, react });
+    const m = toMetres(e.speed);
+    if (m) setMeans.push(m.mean);
+    reps.push({ result: e.result, react, mean: m ? m.mean : null });
     const tr = document.createElement('tr');
+    if (e.n === 1 && reps.length > 1) tr.className = 'setbreak';
     const pill = e.result === 'good' ? '<span class="pill good">Good lift</span>' : e.result === 'early' ? '<span class="pill bad">Early press</span>' : '<span class="pill miss">No lockout</span>';
-    tr.innerHTML = '<td class="num">' + reps.length + '</td>' +
+    tr.innerHTML = '<td class="num">' + setNo + '·' + e.n + '</td>' +
       '<td class="num">' + (e.pauseMs !== null ? (e.pauseMs / 1000).toFixed(2) + ' s' : '–') + '</td>' +
       '<td class="num">' + (react !== null ? Math.max(0, Math.round(react)) + ' ms' : '–') + '</td>' +
+      '<td class="num">' + (m ? m.mean.toFixed(2) : '–') + '</td>' +
+      '<td class="num">' + (m ? m.peak.toFixed(2) : '–') + '</td>' +
       '<td>' + pill + '</td>';
     body.prepend(tr);
+
+    // big on-screen readout the lifter can glance at from the bench
+    if (m) {
+      $('speedBig').innerHTML = m.mean.toFixed(2) + ' <small>m/s</small>';
+      $('speedSub').textContent = 'Rep ' + e.n + ' · peak ' + m.peak.toFixed(2) + ' · ' + Math.round(m.romCm) + ' cm';
+      $('speedTag').hidden = false;
+    }
+
     const good = reps.filter((r) => r.result === 'good');
     const early = reps.filter((r) => r.result === 'early').length;
     const rs = good.map((r) => r.react).filter((r) => r !== null);
     const avg = rs.length ? Math.round(rs.reduce((a, b) => a + b, 0) / rs.length) : null;
-    $('summary').textContent = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' · ' + early + ' early' + (avg !== null ? ' · average response ' + avg + ' ms' : '');
+    let text = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' · ' + early + ' early';
+    if (avg !== null) text += ' · average response ' + avg + ' ms';
+    if (e.n === e.of && setMeans.length > 1) {
+      const best = Math.max(...setMeans), last = setMeans[setMeans.length - 1];
+      text += ' · set ' + setNo + ' velocity loss ' + Math.round(((best - last) / best) * 100) + '%';
+    }
+    $('summary').textContent = text;
   }
   $('clearLog').addEventListener('click', () => {
-    reps.length = 0; $('logBody').innerHTML = '';
-    $('summary').textContent = 'Response is the time from the press call to the bar moving up.';
+    reps.length = 0; setNo = 0; setMeans = []; $('logBody').innerHTML = ''; $('speedTag').hidden = true;
+    $('summary').textContent = 'Response is the time from the press call to the bar moving up. Speed is mean concentric velocity.';
   });
 
   // ---------- judge events ----------
@@ -542,7 +744,7 @@ class BenchJudge {
       if (e.type === 'call') {
         marks.push({ t: e.t, w: e.word[0] });
         showCall(e.word);
-        if (e.word === 'Start') setLights('');
+        if (e.word === 'Start') { setLights(''); scaleAtStart = plateScale(); }
         if (e.word === 'Press') { pressSpokenAt = null; lastReact = null; say('Press', (ts) => { pressSpokenAt = ts; }); }
         else say(e.word);
       } else if (e.type === 'fault') {
@@ -574,7 +776,7 @@ class BenchJudge {
     const useHue = target.s >= 0.28 && target.v >= 0.15;
     const sMin = Math.max(0.2, target.s * 0.45), vMin = target.v * 0.35;
     const scan = (x0, y0, x1, y1) => {
-      let sx = 0, sy = 0, n = 0;
+      let sx = 0, sy = 0, sxx = 0, syy = 0, n = 0;
       for (let y = y0; y < y1; y++) {
         let i = (y * w + x0) * 4;
         for (let x = x0; x < x1; x++, i += 4) {
@@ -592,19 +794,39 @@ class BenchJudge {
             const dr = r - target.r, dg = g - target.g, db = b - target.b;
             ok = dr * dr + dg * dg + db * db <= rgbTol * rgbTol;
           }
-          if (ok) { sx += x; sy += y; n++; }
+          if (ok) { sx += x; sy += y; sxx += x * x; syy += y * y; n++; }
         }
       }
-      return n >= MIN_N ? { x: sx / n + 0.5, y: sy / n + 0.5 } : null;
+      if (n < MIN_N) return null;
+      const mx = sx / n, my = sy / n;
+      const vx = Math.max(0, sxx / n - mx * mx), vy = Math.max(0, syy / n - my * my);
+      // a filled disc of radius r has variance r²/4 on each axis, so diameter = 4·sqrt(variance)
+      return { x: mx + 0.5, y: my + 0.5, n, diam: 4 * Math.sqrt((vx + vy) / 2) };
     };
     let box = [0, 0, w, h];
     if (lastPx && !lost) {
-      const r = Math.round(h * 0.3);
+      const r = Math.round(h * 0.32);
       box = [Math.max(0, Math.floor(lastPx.x - r)), Math.max(0, Math.floor(lastPx.y - r)), Math.min(w, Math.ceil(lastPx.x + r)), Math.min(h, Math.ceil(lastPx.y + r))];
     }
     let hit = scan(...box);
     if (!hit && (box[0] > 0 || box[1] > 0 || box[2] < w || box[3] < h)) hit = scan(0, 0, w, h);
     return hit;
+  }
+  // Share of the frame that changed over ~130 ms (2×2-averaged greyscale), for the feet and hips check.
+  function bodyMotion(d) {
+    const MW = procW >> 1, MH = procH >> 1, g = new Uint8Array(MW * MH), row = procW * 4;
+    for (let y = 0; y < MH; y++) {
+      for (let x = 0; x < MW; x++) {
+        const i = (y * 2) * row + x * 8, j = i + row;
+        g[y * MW + x] = (d[i] + d[i + 1] + d[i + 2] + d[i + 4] + d[i + 5] + d[i + 6] + d[j] + d[j + 1] + d[j + 2] + d[j + 4] + d[j + 5] + d[j + 6]) / 12;
+      }
+    }
+    grayRing.push(g);
+    if (grayRing.length > 5) grayRing.shift();
+    if (grayRing.length < 5) return null;
+    const old = grayRing[0]; let c = 0;
+    for (let k = 0; k < g.length; k++) if (Math.abs(g[k] - old[k]) > 16) c++;
+    return c / g.length;
   }
 
   // ---------- geometry ----------
@@ -630,7 +852,7 @@ class BenchJudge {
     if (!n) return;
     R /= n; G /= n; B /= n;
     target = { r: R, g: G, b: B, ...hsv(R, G, B) };
-    lastPx = { x: px, y: py }; smooth = null; lost = false; judge.learnedRom = null;
+    lastPx = { x: px, y: py }; smooth = null; lost = false; judge.learnedRom = null; diamBuf = [];
     $('swatch').style.background = 'rgb(' + Math.round(R) + ',' + Math.round(G) + ',' + Math.round(B) + ')';
     $('armBtn').disabled = false; $('relockBtn').disabled = false;
     unlockAudio();
@@ -649,16 +871,23 @@ class BenchJudge {
     const r = contentRect();
     if (judge.top) {
       const [tx, ty] = toScreen(judge.top.x * procH, judge.top.y * procH, r);
-      octx.strokeStyle = COL.steel; octx.lineWidth = 2; octx.setLineDash([6, 5]);
+      octx.strokeStyle = COL.muted; octx.lineWidth = 2; octx.setLineDash([6, 5]);
       octx.beginPath(); octx.moveTo(tx - 40, ty); octx.lineTo(tx + 40, ty); octx.stroke(); octx.setLineDash([]);
     }
     if (p) {
       const [x, y] = toScreen(p.x * procH, p.y * procH, r);
+      const med = settings.scale === 'plate' ? plateMedian() : null;
+      if (med) {
+        // where the page thinks the plate's edge is: should sit on the real edge for speed to be right
+        octx.strokeStyle = COL.white; octx.globalAlpha = 0.55; octx.lineWidth = 1.5; octx.setLineDash([3, 5]);
+        octx.beginPath(); octx.arc(x, y, (med * procH / 2) * (r.w / procW), 0, Math.PI * 2); octx.stroke();
+        octx.setLineDash([]); octx.globalAlpha = 1;
+      }
       const col = judge.phase === 'paused' ? COL.amber : COL.white;
       octx.strokeStyle = col; octx.lineWidth = 3;
-      octx.beginPath(); octx.arc(x, y, 16, 0, Math.PI * 2); octx.stroke();
-      octx.beginPath(); octx.moveTo(x - 26, y); octx.lineTo(x - 8, y); octx.moveTo(x + 8, y); octx.lineTo(x + 26, y);
-      octx.moveTo(x, y - 26); octx.lineTo(x, y - 8); octx.moveTo(x, y + 8); octx.lineTo(x, y + 26); octx.stroke();
+      octx.beginPath(); octx.arc(x, y, 14, 0, Math.PI * 2); octx.stroke();
+      octx.beginPath(); octx.moveTo(x - 24, y); octx.lineTo(x - 8, y); octx.moveTo(x + 8, y); octx.lineTo(x + 24, y);
+      octx.moveTo(x, y - 24); octx.lineTo(x, y - 8); octx.moveTo(x, y + 8); octx.lineTo(x, y + 24); octx.stroke();
     } else if (lastPx) {
       const [x, y] = toScreen(lastPx.x, lastPx.y, r);
       octx.strokeStyle = COL.red; octx.lineWidth = 2; octx.setLineDash([4, 4]);
@@ -677,8 +906,8 @@ class BenchJudge {
     tctx.fillText('lockout', 4, top - 3);
     for (const m of marks) {
       const x = ((m.t - t0) / span) * w;
-      tctx.strokeStyle = m.w === '!' ? COL.red : COL.steel; tctx.beginPath(); tctx.moveTo(x, top); tctx.lineTo(x, bot); tctx.stroke();
-      tctx.fillStyle = m.w === '!' ? COL.red : COL.steel; tctx.fillText(m.w, Math.min(w - 8, x + 3), bot - 2);
+      tctx.strokeStyle = m.w === '!' ? COL.red : COL.muted; tctx.beginPath(); tctx.moveTo(x, top); tctx.lineTo(x, bot); tctx.stroke();
+      tctx.fillStyle = m.w === '!' ? COL.red : COL.white; tctx.fillText(m.w, Math.min(w - 8, x + 3), bot - 2);
     }
     tctx.strokeStyle = COL.white; tctx.lineWidth = 2; tctx.beginPath();
     let started = false;
@@ -700,6 +929,7 @@ class BenchJudge {
       if (video.readyState >= 2) {
         pctx.drawImage(video, 0, 0, procW, procH);
         frame = pctx.getImageData(0, 0, procW, procH);
+        bodyNow = bodyMotion(frame.data);
         if (target) {
           const hit = track(frame.data, procW, procH);
           const wasLost = lost;
@@ -708,7 +938,8 @@ class BenchJudge {
             lastPx = hit; lost = false;
             const nx = hit.x / procH, ny = hit.y / procH;
             smooth = smooth ? { x: smooth.x + 0.55 * (nx - smooth.x), y: smooth.y + 0.55 * (ny - smooth.y) } : { x: nx, y: ny };
-            p = smooth;
+            p = { x: smooth.x, y: smooth.y, m: bodyNow };
+            if (hit.n >= 30) { diamBuf.push(hit.diam / procH); if (diamBuf.length > 90) diamBuf.shift(); }
           } else if (!lost) { lost = true; lostSince = now; }
           if (wasLost !== lost) refreshStatus();
         }
@@ -716,6 +947,7 @@ class BenchJudge {
         trace.push({ t: now, d: p && judge.top ? judge.dist(p) : (p ? 0 : null) });
         drawOverlay(p);
         drawTrace(now);
+        drawBodyMeter();
       }
       if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(step); else requestAnimationFrame(step);
     };
@@ -727,7 +959,7 @@ class BenchJudge {
   async function startCamera() {
     $('camErr').hidden = true;
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      camError('This browser blocked the camera. Open the page from an https:// address, or open the file in Chrome on a laptop.');
+      camError('This browser blocked the camera. Open the page from its https:// address, or open the file in Chrome on a laptop.');
       return;
     }
     try {
@@ -738,10 +970,11 @@ class BenchJudge {
       await video.play();
       const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
       if (vw >= vh) { procW = 160; procH = Math.max(60, Math.round(160 * vh / vw)); } else { procH = 160; procW = Math.max(60, Math.round(160 * vw / vh)); }
+      procW -= procW % 2; procH -= procH % 2;
       proc.width = procW; proc.height = procH;
       $('viewport').style.aspectRatio = vw + ' / ' + vh;
       $('placeholder').hidden = true; $('flipBtn').disabled = false;
-      lastPx = null; smooth = null;
+      lastPx = null; smooth = null; grayRing = []; diamBuf = [];
       refreshStatus(); startLoop();
     } catch (err) {
       stream = null;
@@ -754,7 +987,7 @@ class BenchJudge {
   $('camBtn').addEventListener('click', () => { unlockAudio(); startCamera(); });
   $('flipBtn').addEventListener('click', () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); });
   $('relockBtn').addEventListener('click', () => {
-    target = null; lastPx = null; smooth = null; lost = true; judge.learnedRom = null;
+    target = null; lastPx = null; smooth = null; lost = true; judge.learnedRom = null; diamBuf = [];
     if (judge.phase !== 'idle') setArmed(false);
     $('swatch').style.background = ''; $('armBtn').disabled = true; $('relockBtn').disabled = true;
     refreshStatus();
@@ -772,6 +1005,7 @@ class BenchJudge {
 
   window.addEventListener('resize', () => { drawOverlay(null); drawTrace(performance.now()); });
   drawTrace(performance.now());
+  drawBodyMeter();
   refreshStatus();
 })();
 </script>
