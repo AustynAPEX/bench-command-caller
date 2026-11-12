@@ -10,4 +10,6 @@ Pressing before the call gives red lights and a buzzer. Each rep logs the pause,
 
 Commands can use your own recorded voice (record Start, Press and Rack once on your phone; silence is trimmed so each call plays instantly), the phone's built-in voice, or beeps.
 
+Every set can be saved as a clip: recording starts a few seconds before the unrack and ends just after the rerack, with the calls, ref lights, bar speed and bar path burned into the video. Tap Save to keep it (on iPhone, choose Save Video to put it in Photos).
+
 Speed comes from a 30 fps phone camera, so use it to compare reps on the same setup rather than as encoder-grade numbers.

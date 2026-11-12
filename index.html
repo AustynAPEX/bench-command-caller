@@ -165,6 +165,21 @@ ol.setup { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 .tempoCode.on { color: var(--ink); }
 td.off { color: var(--amber); }
 
+.recTag {
+  position: absolute; top: 10px; right: 10px; pointer-events: none; display: flex; align-items: center; gap: 6px;
+  padding: 6px 9px; border-radius: 999px; background: rgba(11,11,11,0.72); border: 1px solid var(--line);
+  color: var(--white); font: 700 10px/1 var(--display); letter-spacing: 0.12em;
+}
+.recTag span { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: recblink 1.2s steps(2, start) infinite; }
+@keyframes recblink { to { visibility: hidden; } }
+.clipList { display: grid; gap: 14px; }
+.clipItem { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+.clipItem:first-child { border-top: 0; padding-top: 0; }
+.clipItem video { display: block; width: 100%; max-width: 100%; background: var(--ground); border-radius: 8px; }
+.clipInfo { display: grid; gap: 2px; min-width: 0; }
+.clipInfo span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.clipBtns { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .clips { display: grid; gap: 8px; }
 .clip { display: grid; grid-template-columns: 5.2em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
 .clip .word { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
@@ -191,7 +206,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
 .foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); padding-top: 4px; }
 .foot a { color: var(--ink); }
 
-@media (prefers-reduced-motion: reduce) { .call, .meter .fill { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .call, .meter .fill { transition: none; } .recTag span { animation: none; } }
 </style>
 </head>
 <body>
@@ -211,6 +226,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
     <div class="viewport" id="viewport">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="overlay" aria-label="Camera view. Tap the plate to lock tracking."></canvas>
+      <div class="recTag" id="recTag" hidden><span></span>REC</div>
       <div class="speedTag" id="speedTag" hidden aria-live="polite"><b id="speedBig">0.00 <small>m/s</small></b><span id="speedSub"></span></div>
       <div class="placeholder" id="placeholder">
         <img src="logo.jpg" alt="Apex Power &amp; Performance" width="760" height="424">
@@ -238,6 +254,16 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </section>
 
   <div class="side">
+    <section class="card" aria-labelledby="clipsTitle">
+      <h2 id="clipsTitle">Clips</h2>
+      <label class="check" for="clipsOn"><input type="checkbox" id="clipsOn"> Record a clip of every set</label>
+      <label class="check" for="clipPath"><input type="checkbox" id="clipPath"> Draw the bar path on clips</label>
+      <p class="note" id="clipNote">Each set is recorded from a few seconds before the unrack to just after you rerack, with the calls, lights, bar speed and bar path burned in. Clips stay on this phone until you close the page, so save the ones you want to keep.</p>
+      <p class="note" id="clipVoiceNote" hidden>The phone voice can't be recorded, so these clips won't have the calls in them. Switch Command voice to Coach Austyn or your own recordings to hear them.</p>
+      <p class="note" id="clipEmpty">No clips yet. Your next set shows up here.</p>
+      <div class="clipList" id="clipList"></div>
+    </section>
+
     <section class="card" aria-labelledby="setupTitle">
       <h2 id="setupTitle">Setup</h2>
       <ol class="setup">
@@ -394,7 +420,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </div>
 
   <footer class="foot">
-    <span>Apex Power &amp; Performance · build 9</span>
+    <span>Apex Power &amp; Performance · build 10</span>
     <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
   </footer>
 </main>
@@ -628,7 +654,7 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, clipsOn: true, clipPath: true, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
@@ -695,6 +721,9 @@ class BenchJudge {
     $('travelCm').value = settings.travelCm;
     $('fps').value = String(settings.fps);
     $('showMask').checked = !!settings.showMask;
+    $('clipsOn').checked = !!settings.clipsOn;
+    $('clipPath').checked = !!settings.clipPath;
+    $('clipVoiceNote').hidden = !(settings.clipsOn && (settings.voiceMode === 'phone' || (settings.voiceMode === 'apex' && !apexReady)));
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
     $('delayNote').textContent = 'Start comes after ' + settings.startHold.toFixed(1) + ' s of stillness' +
@@ -721,6 +750,8 @@ class BenchJudge {
   bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
   $('fps').addEventListener('change', (e) => { settings.fps = Number(e.target.value); settings.fpsChosen = true; applySettings(); if (stream) startCamera(); });
   bind('showMask', 'showMask', (el) => el.checked);
+  bind('clipsOn', 'clipsOn', (el) => el.checked);
+  bind('clipPath', 'clipPath', (el) => el.checked);
   bind('tempoOn', 'tempoOn', (el) => el.checked);
   bind('tEcc', 'tEcc', (el) => Number(el.value));
   bind('tPause', 'tPause', (el) => Number(el.value));
@@ -738,7 +769,7 @@ class BenchJudge {
     g.gain.setValueAtTime(0.0001, when);
     g.gain.exponentialRampToValueAtTime(accent ? 0.32 : 0.2, when + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
-    o.connect(g).connect(a.destination); o.start(when); o.stop(when + 0.06);
+    o.connect(g).connect(outBus()); o.start(when); o.stop(when + 0.06);
   }
   setInterval(() => {
     if (metro.origin === null || !actx || actx.state !== 'running') return;
@@ -762,13 +793,22 @@ class BenchJudge {
     if (a && a.state === 'suspended') a.resume().catch(() => {});
     return a;
   }
+  // All sounds go through one bus, so clips can record the calls, clicks and buzzer.
+  let bus = null, recDest = null;
+  function outBus() { const a = ctx(); if (!bus) { bus = a.createGain(); bus.connect(a.destination); } return bus; }
+  function recAudioTrack() {
+    const a = ctx();
+    if (!a || typeof a.createMediaStreamDestination !== 'function') return null;
+    if (!recDest) { recDest = a.createMediaStreamDestination(); outBus().connect(recDest); }
+    return recDest.stream.getAudioTracks()[0] || null;
+  }
   function tone(freq, ms, type, gain) {
     const a = audio(); if (!a) return;
     const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime;
     o.type = type || 'sine'; o.frequency.value = freq;
     g.gain.setValueAtTime(gain || 0.2, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
-    o.connect(g).connect(a.destination); o.start(t0); o.stop(t0 + ms / 1000 + 0.02);
+    o.connect(g).connect(outBus()); o.start(t0); o.stop(t0 + ms / 1000 + 0.02);
   }
   function pickVoice() {
     if (!('speechSynthesis' in window)) return;
@@ -849,7 +889,7 @@ class BenchJudge {
   function playBuffer(b, onStart) {
     const a = audio();
     if (!a || !b) return false;
-    const src = a.createBufferSource(); src.buffer = b; src.connect(a.destination); src.start();
+    const src = a.createBufferSource(); src.buffer = b; src.connect(outBus()); src.start();
     const lat = ((a.baseLatency || 0) + (a.outputLatency || 0)) * 1000;
     if (onStart) onStart(performance.now() + lat);
     return true;
@@ -986,10 +1026,11 @@ class BenchJudge {
   function showCall(text, bad) {
     const el = $('call');
     el.textContent = text; el.classList.toggle('bad', !!bad); el.classList.add('on');
+    clipCall = { text: String(text).toUpperCase(), bad: !!bad, t: performance.now() };
     clearTimeout(callTimer);
     callTimer = setTimeout(() => el.classList.remove('on'), bad ? 1600 : 1100);
   }
-  function setLights(kind) { $('lights').className = 'lights' + (kind ? ' ' + kind : ''); }
+  function setLights(kind) { $('lights').className = 'lights' + (kind ? ' ' + kind : ''); lightsKind = kind || ''; }
   function drawBodyMeter() {
     const fill = $('bodyFill'), state = $('bodyState');
     if (settings.body === 'off') { fill.style.width = '0'; state.textContent = 'Check off'; return; }
@@ -1046,6 +1087,9 @@ class BenchJudge {
       '<td>' + pill + '</td>';
     body.prepend(tr);
 
+    if (m) clipSpeed = { mean: m.mean, peak: m.peak, n: e.n };
+    if (curRec && curRec.mode === 'set') curRec.meta.reps.push({ result: e.result, mean: m ? m.mean : null });
+
     // big on-screen readout the lifter can glance at from the bench
     if (m) {
       $('speedBig').innerHTML = m.mean.toFixed(2) + ' <small>m/s</small>';
@@ -1080,7 +1124,7 @@ class BenchJudge {
       if (e.type === 'call') {
         marks.push({ t: e.t, w: e.word[0] });
         showCall(e.word);
-        if (e.word === 'Start') { setLights(''); scaleAtStart = plateScale(); if (settings.tempoOn) metroStart(e.t); }
+        if (e.word === 'Start') { setLights(''); scaleAtStart = plateScale(); pathPts = []; clipSpeed = null; if (settings.tempoOn) metroStart(e.t); }
         if (e.word === 'Press') { pressSpokenAt = null; lastReact = null; say('Press', (ts) => { pressSpokenAt = ts; }); }
         else say(e.word);
       } else if (e.type === 'fault') {
@@ -1396,6 +1440,8 @@ class BenchJudge {
           if (wasLost !== lost) refreshStatus();
         }
         handle(judge.update(now, p));
+        if (p && (judge.phase === 'descent' || judge.phase === 'paused' || judge.phase === 'pressing')) { pathPts.push({ x: p.x, y: p.y }); if (pathPts.length > 3000) pathPts.shift(); }
+        clipTick(now);
         trace.push({ t: now, d: p && judge.top ? judge.dist(p) : (p ? 0 : null) });
         drawOverlay(p);
         drawTrace(now);
@@ -1405,6 +1451,196 @@ class BenchJudge {
     };
     if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(step); else requestAnimationFrame(step);
   }
+
+  // ---------- clips: record each set with the calls, lights, speed and bar path burned in ----------
+  const clipCv = document.createElement('canvas'), cctx = clipCv.getContext('2d');
+  clipCv.width = 640; clipCv.height = 480;
+  clipCv.setAttribute('aria-hidden', 'true');
+  clipCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;pointer-events:none;';
+  document.body.appendChild(clipCv); // some browsers only capture canvases that are in the page
+  const CLIPS_OK = typeof MediaRecorder !== 'undefined' && typeof clipCv.captureStream === 'function';
+  const badgeImg = new Image(); badgeImg.src = 'badge.png';
+  const ROLL_MS = 12000, TAIL_MS = 2500, MAX_SET_MS = 180000, MAX_CLIPS = 6;
+  const IN_SET = { settle: 1, descent: 1, paused: 1, pressing: 1 };
+  let clipStream = null, clipMime = null, curRec = null, clipsBroken = false;
+  let clipCall = null, lightsKind = '', clipSpeed = null, pathPts = [];
+  const clipList = [];
+
+  function pickMime() {
+    const list = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+      'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+    return '';
+  }
+  function sizeClipCanvas(vw, vh) {
+    const k = Math.min(1, 1280 / Math.max(vw, vh));
+    clipCv.width = Math.round((vw * k) / 2) * 2; clipCv.height = Math.round((vh * k) / 2) * 2;
+    if (clipStream) { clipStream.getTracks().forEach((t) => t.stop()); clipStream = null; }
+  }
+  function clipTracks(withAudio) {
+    if (!clipStream) clipStream = clipCv.captureStream(Number(settings.fps) === 60 ? 60 : 30);
+    const tracks = clipStream.getVideoTracks().slice();
+    if (withAudio) { const a = recAudioTrack(); if (a) tracks.push(a); }
+    return new MediaStream(tracks);
+  }
+  function makeRecorder() {
+    if (clipMime === null) clipMime = pickMime();
+    const bps = clipCv.width * clipCv.height > 640 * 480 ? 5000000 : 2500000;
+    for (const withAudio of [true, false]) {
+      try { return new MediaRecorder(clipTracks(withAudio), clipMime ? { mimeType: clipMime, videoBitsPerSecond: bps } : { videoBitsPerSecond: bps }); } catch (e) {}
+      try { return new MediaRecorder(clipTracks(withAudio)); } catch (e) {}
+    }
+    throw new Error('MediaRecorder could not start');
+  }
+  function showRec() { $('recTag').hidden = !(curRec && curRec.mode === 'set'); }
+  function recStart(mode, now) {
+    let mr;
+    try { mr = makeRecorder(); } catch (e) { clipsOff('This browser couldn\'t start recording, so clips are off on this phone.'); return; }
+    const r = { mr, mode, chunks: [], startedAt: now, wallStart: performance.now(), stopAt: 0, keep: false, meta: { set: mode === 'set' ? setNo + 1 : null, reps: [] }, w: clipCv.width, h: clipCv.height };
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) r.chunks.push(e.data); };
+    mr.onstop = () => { if (r.keep && r.chunks.length) addClip(r); };
+    mr.onerror = () => { r.keep = false; if (curRec === r) { curRec = null; showRec(); } };
+    try { mr.start(1000); } catch (e) { clipsOff('This browser couldn\'t start recording, so clips are off on this phone.'); return; }
+    curRec = r; showRec();
+  }
+  function recEnd(keep) {
+    const r = curRec; if (!r) return;
+    curRec = null; r.keep = keep; r.wallEnd = performance.now();
+    try { if (r.mr.state !== 'inactive') r.mr.stop(); } catch (e) {}
+    showRec();
+  }
+  function clipsOff(msg) {
+    clipsBroken = true; if (curRec) recEnd(false);
+    $('clipNote').textContent = msg; $('clipsOn').disabled = true; $('clipPath').disabled = true;
+  }
+  // Called once per camera frame. While armed, a rolling recording restarts every 12 s so there's
+  // always some lead-in; when the bar unracks, that recording becomes the set's clip.
+  function clipTick(now) {
+    const ph = judge.phase;
+    if (!CLIPS_OK || clipsBroken || !settings.clipsOn) { if (curRec) recEnd(curRec.mode === 'set'); return; }
+    if (curRec && curRec.mode === 'set') {
+      if (ph === 'rest' && !curRec.stopAt) curRec.stopAt = now + TAIL_MS;
+      if ((curRec.stopAt && now >= curRec.stopAt) || ph === 'armed' || ph === 'idle' || now - curRec.startedAt > MAX_SET_MS) recEnd(true);
+    }
+    if (ph === 'armed') {
+      if (!curRec) recStart('roll', now);
+      else if (curRec.mode === 'roll' && now - curRec.startedAt > ROLL_MS) { recEnd(false); recStart('roll', now); }
+    } else if (IN_SET[ph]) {
+      if (!curRec) recStart('set', now);
+      else if (curRec.mode === 'roll') { curRec.mode = 'set'; curRec.meta.set = setNo + 1; showRec(); }
+    } else if (ph === 'idle' && curRec) recEnd(false);
+    if (curRec) drawClipFrame();
+  }
+  function clipLabel() {
+    const ph = judge.phase, total = Number(settings.reps);
+    let t = curRec && curRec.meta.set ? 'SET ' + curRec.meta.set : 'SET ' + (setNo + 1);
+    if (IN_SET[ph]) t += ' · REP ' + Math.min(total, judge.repInSet + 1) + '/' + total;
+    else if (ph === 'rest') t += ' · ' + judge.repInSet + '/' + total;
+    if (settings.tempoOn) t += ' · ' + settings.tEcc + '-' + settings.tPause + '-' + settings.tCon + '-' + settings.tTop;
+    return t;
+  }
+  function drawClipFrame() {
+    const W = clipCv.width, H = clipCv.height, c = cctx, u = Math.min(W, H) / 480, tnow = performance.now(), pad = 16 * u;
+    const mono = '"JetBrains Mono", Menlo, Consolas, monospace', disp = 'Syncopate, "Arial Black", Helvetica, sans-serif';
+    c.drawImage(video, 0, 0, W, H);
+    if (settings.clipPath && pathPts.length > 1) {
+      c.lineJoin = 'round'; c.lineCap = 'round'; c.beginPath();
+      for (let i = 0; i < pathPts.length; i++) {
+        const q = pathPts[i], X = (q.x * procH / procW) * W, Y = q.y * H;
+        if (i) c.lineTo(X, Y); else c.moveTo(X, Y);
+      }
+      c.strokeStyle = 'rgba(0,0,0,0.55)'; c.lineWidth = 7 * u; c.stroke();
+      c.strokeStyle = '#f7f7f5'; c.lineWidth = 3 * u; c.stroke();
+    }
+    c.save();
+    c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 10 * u; c.textBaseline = 'alphabetic';
+    // brand and set, top left
+    const bs = 46 * u;
+    if (badgeImg.complete && badgeImg.naturalWidth) c.drawImage(badgeImg, pad, pad, bs, bs);
+    c.fillStyle = '#f7f7f5'; c.textAlign = 'left';
+    c.font = '700 ' + Math.round(11 * u) + 'px ' + disp; c.fillText('APEX POWER & PERFORMANCE', pad + bs + 10 * u, pad + 18 * u);
+    c.font = '700 ' + Math.round(14 * u) + 'px ' + mono; c.fillText(clipLabel(), pad + bs + 10 * u, pad + 38 * u);
+    // bar speed, top right
+    if (clipSpeed) {
+      c.textAlign = 'right';
+      c.font = '500 ' + Math.round(14 * u) + 'px ' + mono;
+      const unit = ' m/s', uw = c.measureText(unit).width;
+      c.fillText(unit, W - pad, pad + 32 * u);
+      c.font = '700 ' + Math.round(36 * u) + 'px ' + mono; c.fillText(clipSpeed.mean.toFixed(2), W - pad - uw, pad + 32 * u);
+      c.font = '500 ' + Math.round(13 * u) + 'px ' + mono; c.fillStyle = '#c9c8c4';
+      c.fillText('REP ' + clipSpeed.n + ' · PEAK ' + clipSpeed.peak.toFixed(2), W - pad, pad + 52 * u);
+    }
+    // the call, lower middle
+    if (clipCall && tnow - clipCall.t < (clipCall.bad ? 1600 : 1100)) {
+      c.textAlign = 'center'; c.fillStyle = clipCall.bad ? '#ec5257' : '#f7f7f5'; c.shadowBlur = 18 * u;
+      let size = (clipCall.bad ? 40 : 66) * u;
+      c.font = '700 ' + Math.round(size) + 'px ' + disp;
+      const tw = c.measureText(clipCall.text).width;
+      if (tw > W * 0.9) { size *= (W * 0.9) / tw; c.font = '700 ' + Math.round(size) + 'px ' + disp; }
+      c.fillText(clipCall.text, W / 2, H * 0.74 + size / 3);
+    }
+    // ref lights, bottom middle
+    if (lightsKind) {
+      const col = lightsKind === 'red' ? '#ec5257' : '#f7f7f5', r = 14 * u, gap = 14 * u, y = H - pad - r;
+      c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 16 * u;
+      for (let i = -1; i <= 1; i++) { c.beginPath(); c.arc(W / 2 + i * (2 * r + gap), y, r, 0, Math.PI * 2); c.fill(); }
+    }
+    c.restore();
+  }
+  function fmtDur(s) { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  function addClip(r) {
+    const type = (r.chunks[0] && r.chunks[0].type) || r.mr.mimeType || clipMime || 'video/webm';
+    const blob = new Blob(r.chunks, { type });
+    const ext = /mp4/i.test(type) ? 'mp4' : 'webm', d = new Date(), z = (n) => String(n).padStart(2, '0');
+    const name = 'apex-bench-' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()) + (r.meta.set ? '-set' + r.meta.set : '') + '.' + ext;
+    const clip = { blob, type, name, url: URL.createObjectURL(blob), secs: Math.max(0, (r.wallEnd - r.wallStart) / 1000), meta: r.meta, when: d, w: r.w, h: r.h };
+    try { clip.file = new File([blob], name, { type }); } catch (e) { clip.file = null; }
+    clip.canShare = !!(clip.file && navigator.canShare && navigator.canShare({ files: [clip.file] }));
+    clipList.unshift(clip);
+    while (clipList.length > MAX_CLIPS) URL.revokeObjectURL(clipList.pop().url);
+    renderClipList();
+  }
+  function downloadClip(c) {
+    const a = document.createElement('a'); a.href = c.url; a.download = c.name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function saveClip(c) {
+    if (c.canShare) {
+      try { await navigator.share({ files: [c.file], title: 'Apex bench clip' }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    downloadClip(c);
+  }
+  function renderClipList() {
+    const box = $('clipList'); box.innerHTML = '';
+    $('clipEmpty').hidden = clipList.length > 0;
+    for (const c of clipList) {
+      const item = document.createElement('div'); item.className = 'clipItem';
+      const v = document.createElement('video');
+      v.src = c.url + '#t=0.1'; v.controls = true; v.preload = 'metadata'; v.playsInline = true; v.setAttribute('playsinline', '');
+      v.style.aspectRatio = c.w + ' / ' + c.h;
+      const reps = c.meta.reps, early = reps.filter((x) => x.result === 'early').length, missed = reps.some((x) => x.result === 'missed');
+      const info = document.createElement('div'); info.className = 'clipInfo';
+      const title = document.createElement('b');
+      title.textContent = (c.meta.set ? 'Set ' + c.meta.set + ' · ' : '') + reps.length + (reps.length === 1 ? ' rep' : ' reps') + (early ? ' · ' + early + ' early' : '') + (missed ? ' · no lockout' : '');
+      const sub = document.createElement('span');
+      const sp = reps.map((x) => x.mean).filter((x) => x !== null && x !== undefined);
+      sub.textContent = (sp.length ? sp.map((x) => x.toFixed(2)).join(' · ') + ' m/s · ' : '') + fmtDur(c.secs) + ' · ' + c.when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      info.append(title, sub);
+      const btns = document.createElement('div'); btns.className = 'clipBtns';
+      const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; b.addEventListener('click', fn); btns.appendChild(b); return b; };
+      mk('Save', 'btn primary', () => saveClip(c));
+      if (c.canShare) mk('Download', 'btn', () => downloadClip(c));
+      let armedAt = 0;
+      const del = mk('Delete', 'btn', () => {
+        if (Date.now() - armedAt > 3000) { armedAt = Date.now(); del.textContent = 'Tap again to delete'; setTimeout(() => { del.textContent = 'Delete'; }, 3000); return; }
+        URL.revokeObjectURL(c.url); clipList.splice(clipList.indexOf(c), 1); renderClipList();
+      });
+      item.append(v, info, btns); box.appendChild(item);
+    }
+  }
+  if (!CLIPS_OK) clipsOff('This browser can\'t record video, so clips aren\'t available here. Safari on iPhone and Chrome on Android both work.');
+  renderClipList();
 
   // ---------- camera ----------
   function camError(msg) { const e = $('camErr'); e.textContent = msg; e.hidden = false; $('placeholder').hidden = false; }
@@ -1442,6 +1678,8 @@ class BenchJudge {
       proc.width = procW; proc.height = procH; mid.width = procW * 2; mid.height = procH * 2;
       for (const c of [pctx, mctx]) { c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; }
       $('viewport').style.aspectRatio = vw + ' / ' + vh;
+      if (curRec) recEnd(false);
+      sizeClipCanvas(vw, vh);
       $('placeholder').hidden = true; $('flipBtn').disabled = false;
       lastPx = null; fx.reset(); fy.reset(); grayRing = []; diamBuf = [];
       refreshStatus(); startLoop();
