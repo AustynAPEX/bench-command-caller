@@ -179,6 +179,7 @@ td.off { color: var(--amber); }
 .clipInfo { display: grid; gap: 2px; min-width: 0; }
 .clipInfo span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .clipBtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.clipInfo .bad, .warnNote { color: var(--amber); }
 
 .clips { display: grid; gap: 8px; }
 .clip { display: grid; grid-template-columns: 5.2em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
@@ -257,8 +258,10 @@ tr.setbreak td { border-top: 2px solid var(--line); }
     <section class="card" aria-labelledby="clipsTitle">
       <h2 id="clipsTitle">Clips</h2>
       <label class="check" for="clipsOn"><input type="checkbox" id="clipsOn"> Record a clip of every set</label>
-      <label class="check" for="clipPath"><input type="checkbox" id="clipPath"> Draw the bar path on clips</label>
-      <p class="note" id="clipNote">Each set is recorded from a few seconds before the unrack to just after you rerack, with the calls, lights, bar speed and bar path burned in. Clips stay on this phone until you close the page, so save the ones you want to keep.</p>
+      <label class="check" for="clipOverlay"><input type="checkbox" id="clipOverlay"> Burn the calls, lights and bar speed into the video (beta)</label>
+      <label class="check" for="clipPath"><input type="checkbox" id="clipPath"> Include the bar path</label>
+      <p class="note" id="clipNote"></p>
+      <p class="note warnNote" id="clipWarn" hidden></p>
       <p class="note" id="clipVoiceNote" hidden>The phone voice can't be recorded, so these clips won't have the calls in them. Switch Command voice to Coach Austyn or your own recordings to hear them.</p>
       <p class="note" id="clipEmpty">No clips yet. Your next set shows up here.</p>
       <div class="clipList" id="clipList"></div>
@@ -420,7 +423,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </div>
 
   <footer class="foot">
-    <span>Apex Power &amp; Performance · build 10</span>
+    <span>Apex Power &amp; Performance · build 11</span>
     <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
   </footer>
 </main>
@@ -654,7 +657,7 @@ class BenchJudge {
 
   const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
   const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, clipsOn: true, clipPath: true, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, clipsOn: true, clipOverlay: false, clipPath: true, clipAudioBad: false, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
@@ -723,6 +726,12 @@ class BenchJudge {
     $('showMask').checked = !!settings.showMask;
     $('clipsOn').checked = !!settings.clipsOn;
     $('clipPath').checked = !!settings.clipPath;
+    $('clipOverlay').checked = !!settings.clipOverlay;
+    $('clipPath').disabled = !settings.clipOverlay || $('clipsOn').disabled;
+    $('clipNote').textContent = 'Each set is recorded from a few seconds before the unrack to just after you rerack' +
+      (settings.clipOverlay ? ', with the calls, lights, bar speed' + (settings.clipPath ? ' and bar path' : '') + ' burned in. If a clip comes out at the wrong speed on this phone, the overlay switches itself off.'
+        : (settings.clipAudioBad ? '.' : ', with the calls in the audio.')) +
+      ' Clips stay on this phone until you close the page, so save the ones you want to keep.';
     $('clipVoiceNote').hidden = !(settings.clipsOn && (settings.voiceMode === 'phone' || (settings.voiceMode === 'apex' && !apexReady)));
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
@@ -752,6 +761,7 @@ class BenchJudge {
   bind('showMask', 'showMask', (el) => el.checked);
   bind('clipsOn', 'clipsOn', (el) => el.checked);
   bind('clipPath', 'clipPath', (el) => el.checked);
+  bind('clipOverlay', 'clipOverlay', (el) => { if (el.checked) $('clipWarn').hidden = true; return el.checked; });
   bind('tempoOn', 'tempoOn', (el) => el.checked);
   bind('tEcc', 'tEcc', (el) => Number(el.value));
   bind('tPause', 'tPause', (el) => Number(el.value));
@@ -1456,7 +1466,7 @@ class BenchJudge {
   const clipCv = document.createElement('canvas'), cctx = clipCv.getContext('2d');
   clipCv.width = 640; clipCv.height = 480;
   clipCv.setAttribute('aria-hidden', 'true');
-  clipCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;pointer-events:none;';
+  clipCv.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;';
   document.body.appendChild(clipCv); // some browsers only capture canvases that are in the page
   const CLIPS_OK = typeof MediaRecorder !== 'undefined' && typeof clipCv.captureStream === 'function';
   const badgeImg = new Image(); badgeImg.src = 'badge.png';
@@ -1477,26 +1487,36 @@ class BenchJudge {
     clipCv.width = Math.round((vw * k) / 2) * 2; clipCv.height = Math.round((vh * k) / 2) * 2;
     if (clipStream) { clipStream.getTracks().forEach((t) => t.stop()); clipStream = null; }
   }
-  function clipTracks(withAudio) {
-    if (!clipStream) clipStream = clipCv.captureStream(Number(settings.fps) === 60 ? 60 : 30);
-    const tracks = clipStream.getVideoTracks().slice();
-    if (withAudio) { const a = recAudioTrack(); if (a) tracks.push(a); }
+  function clipTracks(withAudio, overlay) {
+    let vt;
+    if (overlay) {
+      if (!clipStream) clipStream = clipCv.captureStream(Number(settings.fps) === 60 ? 60 : 30);
+      vt = clipStream.getVideoTracks();
+    } else vt = stream ? stream.getVideoTracks() : [];
+    const tracks = vt.slice();
+    if (withAudio && !settings.clipAudioBad) { const a = recAudioTrack(); if (a) tracks.push(a); }
     return new MediaStream(tracks);
   }
-  function makeRecorder() {
+  // Default: record the camera's own video track, which keeps true timing on every phone.
+  // Overlay mode records a canvas with the overlays drawn on; some browsers time that wrongly.
+  function makeRecorder(overlay) {
     if (clipMime === null) clipMime = pickMime();
-    const bps = clipCv.width * clipCv.height > 640 * 480 ? 5000000 : 2500000;
+    const px = overlay ? clipCv.width * clipCv.height : (video.videoWidth * video.videoHeight);
+    const bps = px > 640 * 480 ? 5000000 : 2500000;
     for (const withAudio of [true, false]) {
-      try { return new MediaRecorder(clipTracks(withAudio), clipMime ? { mimeType: clipMime, videoBitsPerSecond: bps } : { videoBitsPerSecond: bps }); } catch (e) {}
-      try { return new MediaRecorder(clipTracks(withAudio)); } catch (e) {}
+      const src = clipTracks(withAudio, overlay), audio = src.getAudioTracks().length > 0;
+      try { return { mr: new MediaRecorder(src, clipMime ? { mimeType: clipMime, videoBitsPerSecond: bps } : { videoBitsPerSecond: bps }), audio }; } catch (e) {}
+      try { return { mr: new MediaRecorder(src), audio }; } catch (e) {}
     }
     throw new Error('MediaRecorder could not start');
   }
   function showRec() { $('recTag').hidden = !(curRec && curRec.mode === 'set'); }
   function recStart(mode, now) {
-    let mr;
-    try { mr = makeRecorder(); } catch (e) { clipsOff('This browser couldn\'t start recording, so clips are off on this phone.'); return; }
-    const r = { mr, mode, chunks: [], startedAt: now, wallStart: performance.now(), stopAt: 0, keep: false, meta: { set: mode === 'set' ? setNo + 1 : null, reps: [] }, w: clipCv.width, h: clipCv.height };
+    let made; const overlay = !!settings.clipOverlay;
+    try { made = makeRecorder(overlay); } catch (e) { clipsOff('This browser couldn\'t start recording, so clips are off on this phone.'); return; }
+    const mr = made.mr;
+    const r = { mr, mode, overlay, audio: made.audio, chunks: [], startedAt: now, wallStart: performance.now(), stopAt: 0, keep: false, meta: { set: mode === 'set' ? setNo + 1 : null, reps: [] },
+      w: overlay ? clipCv.width : (video.videoWidth || 4), h: overlay ? clipCv.height : (video.videoHeight || 3) };
     mr.ondataavailable = (e) => { if (e.data && e.data.size) r.chunks.push(e.data); };
     mr.onstop = () => { if (r.keep && r.chunks.length) addClip(r); };
     mr.onerror = () => { r.keep = false; if (curRec === r) { curRec = null; showRec(); } };
@@ -1509,9 +1529,10 @@ class BenchJudge {
     try { if (r.mr.state !== 'inactive') r.mr.stop(); } catch (e) {}
     showRec();
   }
+  function warn(msg) { const w = $('clipWarn'); w.textContent = msg; w.hidden = false; }
   function clipsOff(msg) {
     clipsBroken = true; if (curRec) recEnd(false);
-    $('clipNote').textContent = msg; $('clipsOn').disabled = true; $('clipPath').disabled = true;
+    warn(msg); $('clipsOn').disabled = true; $('clipOverlay').disabled = true; $('clipPath').disabled = true;
   }
   // Called once per camera frame. While armed, a rolling recording restarts every 12 s so there's
   // always some lead-in; when the bar unracks, that recording becomes the set's clip.
@@ -1522,6 +1543,7 @@ class BenchJudge {
       if (ph === 'rest' && !curRec.stopAt) curRec.stopAt = now + TAIL_MS;
       if ((curRec.stopAt && now >= curRec.stopAt) || ph === 'armed' || ph === 'idle' || now - curRec.startedAt > MAX_SET_MS) recEnd(true);
     }
+    if (curRec && curRec.mode === 'roll' && curRec.overlay !== !!settings.clipOverlay) recEnd(false);
     if (ph === 'armed') {
       if (!curRec) recStart('roll', now);
       else if (curRec.mode === 'roll' && now - curRec.startedAt > ROLL_MS) { recEnd(false); recStart('roll', now); }
@@ -1529,7 +1551,7 @@ class BenchJudge {
       if (!curRec) recStart('set', now);
       else if (curRec.mode === 'roll') { curRec.mode = 'set'; curRec.meta.set = setNo + 1; showRec(); }
     } else if (ph === 'idle' && curRec) recEnd(false);
-    if (curRec) drawClipFrame();
+    if (curRec && curRec.overlay) drawClipFrame();
   }
   function clipLabel() {
     const ph = judge.phase, total = Number(settings.reps);
@@ -1593,12 +1615,49 @@ class BenchJudge {
     const blob = new Blob(r.chunks, { type });
     const ext = /mp4/i.test(type) ? 'mp4' : 'webm', d = new Date(), z = (n) => String(n).padStart(2, '0');
     const name = 'apex-bench-' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()) + (r.meta.set ? '-set' + r.meta.set : '') + '.' + ext;
-    const clip = { blob, type, name, url: URL.createObjectURL(blob), secs: Math.max(0, (r.wallEnd - r.wallStart) / 1000), meta: r.meta, when: d, w: r.w, h: r.h };
+    const clip = { blob, type, name, url: URL.createObjectURL(blob), secs: Math.max(0, (r.wallEnd - r.wallStart) / 1000), meta: r.meta, when: d, w: r.w, h: r.h, overlay: r.overlay, audio: r.audio };
     try { clip.file = new File([blob], name, { type }); } catch (e) { clip.file = null; }
     clip.canShare = !!(clip.file && navigator.canShare && navigator.canShare({ files: [clip.file] }));
     clipList.unshift(clip);
     while (clipList.length > MAX_CLIPS) URL.revokeObjectURL(clipList.pop().url);
     renderClipList();
+    checkClipTiming(clip);
+  }
+  // How long does the saved file actually play? (Browsers that leave the length out of the file
+  // report Infinity until asked to seek to the end.)
+  function playLength(url) {
+    return new Promise((resolve) => {
+      const v = document.createElement('video'); v.muted = true; v.preload = 'auto'; v.playsInline = true; v.setAttribute('playsinline', '');
+      let done = false;
+      const finish = (d) => { if (done) return; done = true; clearTimeout(timer); v.removeAttribute('src'); try { v.load(); } catch (e) {} resolve(d); };
+      const timer = setTimeout(() => finish(NaN), 8000);
+      const check = () => { if (isFinite(v.duration) && v.duration > 0) finish(v.duration); };
+      v.addEventListener('loadedmetadata', () => { if (isFinite(v.duration) && v.duration > 0) finish(v.duration); else { try { v.currentTime = 1e101; } catch (e) {} } });
+      v.addEventListener('durationchange', check);
+      v.addEventListener('timeupdate', check);
+      v.addEventListener('error', () => finish(NaN));
+      v.src = url;
+    });
+  }
+  // A clip that plays much shorter or longer than it took to record came out at the wrong speed.
+  // Step this phone down to the next safest recording mode so the next set records properly.
+  async function checkClipTiming(clip) {
+    const d = await playLength(clip.url);
+    clip.playSecs = d;
+    if (!isFinite(d) || clip.secs < 3) return;
+    const ratio = d / clip.secs;
+    if (ratio > 0.8 && ratio < 1.25) return;
+    clip.badTiming = true;
+    if (clip.overlay && settings.clipOverlay) {
+      settings.clipOverlay = false;
+      warn('That clip came out at the wrong speed on this phone, so the burned-in overlay is now off. Your next set records the camera directly, with the calls in the audio.');
+    } else if (clip.audio && !settings.clipAudioBad) {
+      settings.clipAudioBad = true;
+      warn('That clip came out at the wrong speed on this phone, so your next set records the video without the calls in the audio.');
+    } else if (!clip.overlay) {
+      warn('This phone\'s browser isn\'t recording clips at the right speed. Turn clips off above for now.');
+    }
+    applySettings(); renderClipList();
   }
   function downloadClip(c) {
     const a = document.createElement('a'); a.href = c.url; a.download = c.name; a.rel = 'noopener';
@@ -1627,6 +1686,7 @@ class BenchJudge {
       const sp = reps.map((x) => x.mean).filter((x) => x !== null && x !== undefined);
       sub.textContent = (sp.length ? sp.map((x) => x.toFixed(2)).join(' · ') + ' m/s · ' : '') + fmtDur(c.secs) + ' · ' + c.when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       info.append(title, sub);
+      if (c.badTiming) { const b = document.createElement('span'); b.className = 'bad'; b.textContent = 'This clip plays at the wrong speed (' + fmtDur(c.playSecs) + ' instead of ' + fmtDur(c.secs) + ').'; info.append(b); }
       const btns = document.createElement('div'); btns.className = 'clipBtns';
       const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; b.addEventListener('click', fn); btns.appendChild(b); return b; };
       mk('Save', 'btn primary', () => saveClip(c));
