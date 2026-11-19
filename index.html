@@ -423,7 +423,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </div>
 
   <footer class="foot">
-    <span>Apex Power &amp; Performance · build 11</span>
+    <span>Apex Power &amp; Performance · build 12</span>
     <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
   </footer>
 </main>
@@ -731,7 +731,7 @@ class BenchJudge {
     $('clipNote').textContent = 'Each set is recorded from a few seconds before the unrack to just after you rerack' +
       (settings.clipOverlay ? ', with the calls, lights, bar speed' + (settings.clipPath ? ' and bar path' : '') + ' burned in. If a clip comes out at the wrong speed on this phone, the overlay switches itself off.'
         : (settings.clipAudioBad ? '.' : ', with the calls in the audio.')) +
-      ' Clips stay on this phone until you close the page, so save the ones you want to keep.';
+      ' Saved clips carry the Apex watermark. Clips stay on this phone until you close the page, so save the ones you want to keep.';
     $('clipVoiceNote').hidden = !(settings.clipsOn && (settings.voiceMode === 'phone' || (settings.voiceMode === 'apex' && !apexReady)));
     $('plateField').hidden = settings.scale !== 'plate';
     $('travelField').hidden = settings.scale !== 'travel';
@@ -1462,6 +1462,367 @@ class BenchJudge {
     if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(step); else requestAnimationFrame(step);
   }
 
+  // WATERMARK START
+  // Saved clips are the camera's own recording. To brand them, each frame is decoded, drawn with the
+  // Apex watermark and re-encoded with the browser's built-in video encoder (WebCodecs). Every frame
+  // keeps its original timestamp and the audio is copied across untouched, so speed can't change.
+  const WM_OK = typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined' &&
+    typeof VideoFrame !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
+  const MP4 = (() => {
+    const CONTAINERS = { moov: 1, trak: 1, mdia: 1, minf: 1, stbl: 1, mvex: 1, moof: 1, traf: 1, dinf: 1, edts: 1 };
+    const fourcc = (dv, p) => String.fromCharCode(dv.getUint8(p), dv.getUint8(p + 1), dv.getUint8(p + 2), dv.getUint8(p + 3));
+    function boxes(dv, start, end) {
+      const out = [];
+      let p = start;
+      while (p + 8 <= end) {
+        let size = dv.getUint32(p), hs = 8;
+        const type = fourcc(dv, p + 4);
+        if (size === 1) { size = Number(dv.getBigUint64(p + 8)); hs = 16; } else if (size === 0) size = end - p;
+        if (size < hs || p + size > end) break;
+        out.push({ type, start: p, end: p + size, body: p + hs });
+        p += size;
+      }
+      return out;
+    }
+    const kids = (dv, box, type, skip) => boxes(dv, box.body + (skip || 0), box.end).filter((b) => !type || b.type === type);
+    const kid = (dv, box, type, skip) => kids(dv, box, type, skip)[0] || null;
+    const u64 = (dv, p) => Number(dv.getBigUint64(p));
+
+    function parse(ab) {
+      const dv = new DataView(ab), top = boxes(dv, 0, ab.byteLength);
+      const moov = top.find((b) => b.type === 'moov');
+      if (!moov) throw new Error('not an mp4 file');
+      const mvhd = kid(dv, moov, 'mvhd');
+      const movieTs = mvhd ? dv.getUint32(mvhd.body + (dv.getUint8(mvhd.body) === 1 ? 20 : 12)) || 1000 : 1000;
+      const trex = {};
+      const mvex = kid(dv, moov, 'mvex');
+      if (mvex) for (const t of kids(dv, mvex, 'trex')) {
+        const p = t.body + 4;
+        trex[dv.getUint32(p)] = { dur: dv.getUint32(p + 8), size: dv.getUint32(p + 12), flags: dv.getUint32(p + 16) };
+      }
+      const tracks = [], byId = {};
+      for (const trak of kids(dv, moov, 'trak')) {
+        const tkhd = kid(dv, trak, 'tkhd'), mdia = kid(dv, trak, 'mdia');
+        if (!tkhd || !mdia) continue;
+        const tv = dv.getUint8(tkhd.body);
+        const id = dv.getUint32(tkhd.body + (tv === 1 ? 20 : 12));
+        const mo = tkhd.body + (tv === 1 ? 52 : 40);
+        const m = [0, 1, 3, 4].map((i) => Math.round(dv.getInt32(mo + i * 4) / 65536));
+        let rotation = 0;
+        if (m[0] === 0 && m[1] === 1 && m[2] === -1) rotation = 90;
+        else if (m[0] === -1 && m[3] === -1) rotation = 180;
+        else if (m[0] === 0 && m[1] === -1 && m[2] === 1) rotation = 270;
+        const mdhd = kid(dv, mdia, 'mdhd'), hdlr = kid(dv, mdia, 'hdlr'), minf = kid(dv, mdia, 'minf');
+        const stbl = minf && kid(dv, minf, 'stbl');
+        if (!mdhd || !hdlr || !stbl) continue;
+        const handler = fourcc(dv, hdlr.body + 8);
+        if (handler !== 'vide' && handler !== 'soun') continue;
+        const timescale = dv.getUint32(mdhd.body + (dv.getUint8(mdhd.body) === 1 ? 20 : 12));
+        const stsd = kid(dv, stbl, 'stsd');
+        if (!stsd) continue;
+        const entry = boxes(dv, stsd.body + 8, stsd.end)[0];
+        if (!entry) continue;
+        // edit list: leading empty edits delay the track; the first real edit says where in the media it starts
+        let shift = 0;
+        const edts = kid(dv, trak, 'edts'), elst = edts && kid(dv, edts, 'elst');
+        if (elst) {
+          const v1 = dv.getUint8(elst.body) === 1, cnt = dv.getUint32(elst.body + 4), sz = v1 ? 20 : 12;
+          let empty = 0;
+          for (let e = 0; e < cnt; e++) {
+            const q = elst.body + 8 + e * sz;
+            const segDur = v1 ? u64(dv, q) : dv.getUint32(q), mt = v1 ? Number(dv.getBigInt64(q + 8)) : dv.getInt32(q + 4);
+            if (mt === -1) { empty += segDur; continue; }
+            shift = empty / movieTs - mt / timescale; break;
+          }
+        }
+        const tr = { id, kind: handler === 'vide' ? 'video' : 'audio', timescale, rotation, shift, stsd, entry: entry.type, samples: [], next: 0 };
+        if (tr.kind === 'video') {
+          tr.width = dv.getUint16(entry.body + 24); tr.height = dv.getUint16(entry.body + 26);
+          const cfg = boxes(dv, entry.body + 78, entry.end).find((b) => b.type === 'avcC' || b.type === 'vpcC' || b.type === 'hvcC' || b.type === 'av1C');
+          if (cfg) tr.config = { type: cfg.type, bytes: new Uint8Array(ab, cfg.body, cfg.end - cfg.body) };
+        }
+        // samples listed in the track's own tables (non-fragmented files)
+        const get = (t) => kid(dv, stbl, t);
+        const stsz = get('stsz');
+        const n = stsz ? dv.getUint32(stsz.body + 8) : 0;
+        if (n > 0) {
+          const fixed = dv.getUint32(stsz.body + 4);
+          const sizes = new Array(n), dts = new Array(n), cts = new Array(n).fill(0), offs = new Array(n);
+          for (let i = 0; i < n; i++) sizes[i] = fixed || dv.getUint32(stsz.body + 12 + i * 4);
+          const stts = get('stts'); let i = 0, t = 0;
+          if (stts) for (let e = 0, ec = dv.getUint32(stts.body + 4); e < ec; e++) {
+            const cnt = dv.getUint32(stts.body + 8 + e * 8), d = dv.getUint32(stts.body + 12 + e * 8);
+            for (let k = 0; k < cnt && i < n; k++, i++) { dts[i] = t; t += d; }
+          }
+          for (; i < n; i++) dts[i] = t;
+          const ctts = get('ctts');
+          if (ctts) {
+            const v1 = dv.getUint8(ctts.body) === 1; let j = 0;
+            for (let e = 0, ec = dv.getUint32(ctts.body + 4); e < ec; e++) {
+              const cnt = dv.getUint32(ctts.body + 8 + e * 8), o = v1 ? dv.getInt32(ctts.body + 12 + e * 8) : dv.getUint32(ctts.body + 12 + e * 8);
+              for (let k = 0; k < cnt && j < n; k++, j++) cts[j] = o;
+            }
+          }
+          const stsc = get('stsc'), stco = get('stco'), co64 = get('co64');
+          const chunks = [];
+          if (stco) for (let e = 0, ec = dv.getUint32(stco.body + 4); e < ec; e++) chunks.push(dv.getUint32(stco.body + 8 + e * 4));
+          else if (co64) for (let e = 0, ec = dv.getUint32(co64.body + 4); e < ec; e++) chunks.push(u64(dv, co64.body + 8 + e * 8));
+          const sc = [];
+          if (stsc) for (let e = 0, ec = dv.getUint32(stsc.body + 4); e < ec; e++) sc.push({ first: dv.getUint32(stsc.body + 8 + e * 12), per: dv.getUint32(stsc.body + 12 + e * 12) });
+          let s = 0;
+          for (let c = 0; c < chunks.length && s < n && sc.length; c++) {
+            let per = sc[0].per;
+            for (const x of sc) { if (x.first <= c + 1) per = x.per; else break; }
+            let off = chunks[c];
+            for (let k = 0; k < per && s < n; k++, s++) { offs[s] = off; off += sizes[s]; }
+          }
+          const stss = get('stss'); let sync = null;
+          if (stss) { sync = new Set(); for (let e = 0, ec = dv.getUint32(stss.body + 4); e < ec; e++) sync.add(dv.getUint32(stss.body + 8 + e * 4)); }
+          for (let k = 0; k < n; k++) {
+            if (offs[k] === undefined) break;
+            const dur = k + 1 < n ? dts[k + 1] - dts[k] : (k > 0 ? dts[k] - dts[k - 1] : 0);
+            tr.samples.push({ offset: offs[k], size: sizes[k], dts: dts[k], cts: cts[k], dur, key: tr.kind === 'audio' || !sync || sync.has(k + 1) });
+          }
+          tr.next = t;
+        }
+        tracks.push(tr); byId[id] = tr;
+      }
+      // samples in movie fragments (what MediaRecorder usually writes)
+      for (const moof of top.filter((b) => b.type === 'moof')) {
+        for (const traf of kids(dv, moof, 'traf')) {
+          const tfhd = kid(dv, traf, 'tfhd');
+          if (!tfhd) continue;
+          const fl = dv.getUint32(tfhd.body) & 0xffffff;
+          let p = tfhd.body + 4;
+          const tr = byId[dv.getUint32(p)]; p += 4;
+          if (!tr) continue;
+          const dflt = trex[tr.id] || { dur: 0, size: 0, flags: 0 };
+          let base = moof.start, dDur = dflt.dur, dSize = dflt.size, dFlags = dflt.flags;
+          if (fl & 0x01) { base = u64(dv, p); p += 8; }
+          if (fl & 0x02) p += 4;
+          if (fl & 0x08) { dDur = dv.getUint32(p); p += 4; }
+          if (fl & 0x10) { dSize = dv.getUint32(p); p += 4; }
+          if (fl & 0x20) { dFlags = dv.getUint32(p); p += 4; }
+          const tfdt = kid(dv, traf, 'tfdt');
+          if (tfdt) tr.next = dv.getUint8(tfdt.body) === 1 ? u64(dv, tfdt.body + 4) : dv.getUint32(tfdt.body + 4);
+          let ptr = null;
+          for (const trun of kids(dv, traf, 'trun')) {
+            const v1 = dv.getUint8(trun.body) === 1, tf = dv.getUint32(trun.body) & 0xffffff;
+            let q = trun.body + 4;
+            const count = dv.getUint32(q); q += 4;
+            if (tf & 0x01) { ptr = base + dv.getInt32(q); q += 4; } else if (ptr === null) ptr = base;
+            let first = null;
+            if (tf & 0x04) { first = dv.getUint32(q); q += 4; }
+            for (let i = 0; i < count; i++) {
+              let dur = dDur, size = dSize, flags = dFlags, cto = 0;
+              if (tf & 0x100) { dur = dv.getUint32(q); q += 4; }
+              if (tf & 0x200) { size = dv.getUint32(q); q += 4; }
+              if (tf & 0x400) { flags = dv.getUint32(q); q += 4; }
+              if (tf & 0x800) { cto = v1 ? dv.getInt32(q) : dv.getUint32(q); q += 4; }
+              if (i === 0 && first !== null) flags = first;
+              tr.samples.push({ offset: ptr, size, dts: tr.next, cts: cto, dur, key: tr.kind === 'audio' || !((flags >> 16) & 1) });
+              tr.next += dur; ptr += size;
+            }
+          }
+        }
+      }
+      for (const tr of tracks) tr.samples = tr.samples.filter((s) => s.size > 0 && s.offset >= 0 && s.offset + s.size <= ab.byteLength);
+      return { tracks };
+    }
+
+    function decoderConfig(tr) {
+      const c = tr.config, hex = (v) => v.toString(16).padStart(2, '0'), dd = (v) => String(v).padStart(2, '0');
+      if ((tr.entry === 'avc1' || tr.entry === 'avc3') && c && c.type === 'avcC')
+        return { codec: 'avc1.' + hex(c.bytes[1]) + hex(c.bytes[2]) + hex(c.bytes[3]), description: c.bytes, codedWidth: tr.width, codedHeight: tr.height };
+      if (tr.entry === 'vp09') {
+        // some recorders write level 0 ("unknown"), which decoders reject, so also offer standard levels
+        const b = c && c.type === 'vpcC' ? c.bytes : null, prof = b ? dd(b[4]) : '00', depth = b ? dd(b[6] >> 4 || 8) : '08';
+        const levels = [b && b[5] ? dd(b[5]) : null, '31', '40', '41', '51'].filter(Boolean);
+        return levels.map((l) => ({ codec: 'vp09.' + prof + '.' + l + '.' + depth, codedWidth: tr.width, codedHeight: tr.height }));
+      }
+      if (tr.entry === 'vp08') return { codec: 'vp8', codedWidth: tr.width, codedHeight: tr.height };
+      return null;
+    }
+
+    // ---- writing: ftyp | mdat (video samples, then audio samples) | moov ----
+    const cat = (parts) => { let n = 0; for (const x of parts) n += x.length; const o = new Uint8Array(n); let p = 0; for (const x of parts) { o.set(x, p); p += x.length; } return o; };
+    const U32 = (v) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v >>> 0); return b; };
+    const U16 = (v) => { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, v & 0xffff); return b; };
+    const STR = (s) => Uint8Array.from(s, (ch) => ch.charCodeAt(0));
+    const ZERO = (n) => new Uint8Array(n);
+    const box = (type, ...parts) => { const body = cat(parts); return cat([U32(body.length + 8), STR(type), body]); };
+    const full = (type, version, flags, ...parts) => box(type, U32(((version & 0xff) << 24) | (flags & 0xffffff)), ...parts);
+    const MATRIX = cat([U32(0x00010000), U32(0), U32(0), U32(0), U32(0x00010000), U32(0), U32(0), U32(0), U32(0x40000000)]);
+    const rle = (vals) => { const out = []; for (const v of vals) { const l = out[out.length - 1]; if (l && l[1] === v) l[0]++; else out.push([1, v]); } return out; };
+    const sttsBox = (durs) => { const r = rle(durs); return full('stts', 0, 0, U32(r.length), ...r.map(([c, d]) => cat([U32(c), U32(d)]))); };
+    const stszBox = (sizes) => full('stsz', 0, 0, U32(0), U32(sizes.length), ...sizes.map(U32));
+    const stscBox = (n) => full('stsc', 0, 0, U32(1), U32(1), U32(n), U32(1));
+    const stcoBox = (off) => full('stco', 0, 0, U32(1), U32(off));
+    const dinf = () => box('dinf', full('dref', 0, 0, U32(1), full('url ', 0, 1)));
+    function trak({ id, kind, timescale, dur, movieDur, width, height, stsd, sizes, durs, keys, offset, delayMs, skip }) {
+      const tkhd = full('tkhd', 0, 3, U32(0), U32(0), U32(id), U32(0), U32(movieDur), ZERO(8), U16(0), U16(0), U16(kind === 'audio' ? 0x0100 : 0), U16(0), MATRIX,
+        U32((width || 0) * 65536), U32((height || 0) * 65536));
+      let edts = [];
+      if (delayMs > 0) edts = [box('edts', full('elst', 0, 0, U32(2), U32(delayMs), U32(0xffffffff), U16(1), U16(0),
+        U32(Math.round((dur / timescale) * 1000)), U32(0), U16(1), U16(0)))];
+      else if (skip > 0) edts = [box('edts', full('elst', 0, 0, U32(1), U32(Math.max(0, Math.round(((dur - skip) / timescale) * 1000))), U32(skip), U16(1), U16(0)))];
+      const mdhd = full('mdhd', 0, 0, U32(0), U32(0), U32(timescale), U32(dur), U16(0x55c4), U16(0));
+      const hdlr = full('hdlr', 0, 0, U32(0), STR(kind === 'audio' ? 'soun' : 'vide'), ZERO(12), STR(kind === 'audio' ? 'SoundHandler' : 'VideoHandler'), ZERO(1));
+      const mhd = kind === 'audio' ? full('smhd', 0, 0, U16(0), U16(0)) : full('vmhd', 0, 1, U16(0), U16(0), U16(0), U16(0));
+      const stblParts = [stsd, sttsBox(durs)];
+      if (keys && keys.length < sizes.length) stblParts.push(full('stss', 0, 0, U32(keys.length), ...keys.map(U32)));
+      stblParts.push(stscBox(sizes.length), stszBox(sizes), stcoBox(offset));
+      return box('trak', tkhd, ...edts, box('mdia', mdhd, hdlr, box('minf', mhd, dinf(), box('stbl', ...stblParts))));
+    }
+    function videoEntry(codec, width, height, desc) {
+      const head = cat([ZERO(6), U16(1), ZERO(16), U16(width), U16(height), U32(0x00480000), U32(0x00480000), U32(0), U16(1), ZERO(32), U16(0x18), U16(0xffff)]);
+      if (/^avc1/.test(codec)) {
+        if (!desc) throw new Error('encoder gave no avcC');
+        return box('avc1', head, box('avcC', desc));
+      }
+      if (/^vp09/.test(codec)) {
+        const [, p, l, d] = codec.split('.').map((x) => parseInt(x, 10));
+        return box('vp09', head, full('vpcC', 1, 0, Uint8Array.of(p || 0, l || 10, ((d || 8) << 4) | (1 << 1), 1, 1, 1), U16(0)));
+      }
+      throw new Error('unsupported output codec ' + codec);
+    }
+    function write({ video, audio }) {
+      const VTS = 90000, ch = video.chunks;
+      for (let i = 1; i < ch.length; i++) if (ch[i].ts <= ch[i - 1].ts) throw new Error('frames out of order');
+      const ticks = ch.map((c) => Math.round((c.ts * VTS) / 1e6));
+      const fallback = ch.length > 1 ? ticks[ticks.length - 1] - ticks[ticks.length - 2] : 3000;
+      const vDurs = ticks.map((t, i) => (i + 1 < ticks.length ? Math.max(1, ticks[i + 1] - t) : Math.max(1, Math.round(((ch[i].dur || 0) * VTS) / 1e6) || fallback)));
+      const vDur = vDurs.reduce((a, b) => a + b, 0);
+      const vSizes = ch.map((c) => c.data.length), keys = [];
+      ch.forEach((c, i) => { if (c.key) keys.push(i + 1); });
+      const aSizes = audio ? audio.samples.map((s) => s.data.length) : [];
+      const aDurs = audio ? audio.samples.map((s) => Math.max(0, s.dur)) : [];
+      const aDur = aDurs.reduce((a, b) => a + b, 0);
+      const vBytes = vSizes.reduce((a, b) => a + b, 0), aBytes = aSizes.reduce((a, b) => a + b, 0);
+      if (vBytes + aBytes + 8 > 0xffffffff) throw new Error('clip too large');
+      const ftyp = box('ftyp', STR('mp42'), U32(0), STR('mp42'), STR('isom'), STR('iso2'), STR('mp41'), ...(/^avc1/.test(video.codec) ? [STR('avc1')] : []));
+      const mdatHead = cat([U32(8 + vBytes + aBytes), STR('mdat')]);
+      const vOff = ftyp.length + 8, aOff = vOff + vBytes;
+      const delayMs = audio ? Math.max(0, Math.round(audio.delayMs || 0)) : 0;
+      const skip = audio && (audio.delayMs || 0) < 0 ? Math.round((-audio.delayMs / 1000) * audio.timescale) : 0;
+      const movieDur = Math.round(Math.max(vDur / VTS, audio ? (aDur - skip) / audio.timescale + delayMs / 1000 : 0) * 1000);
+      const vStsd = full('stsd', 0, 0, U32(1), videoEntry(video.codec, video.width, video.height, video.description));
+      const traks = [trak({ id: 1, kind: 'video', timescale: VTS, dur: vDur, movieDur, width: video.width, height: video.height, stsd: vStsd, sizes: vSizes, durs: vDurs, keys, offset: vOff })];
+      if (audio && audio.samples.length) traks.push(trak({ id: 2, kind: 'audio', timescale: audio.timescale, dur: aDur, movieDur, stsd: audio.stsd, sizes: aSizes, durs: aDurs, offset: aOff, delayMs, skip }));
+      const mvhd = full('mvhd', 0, 0, U32(0), U32(0), U32(1000), U32(movieDur), U32(0x00010000), U16(0x0100), ZERO(10), MATRIX, ZERO(24), U32(traks.length + 1));
+      return [ftyp, mdatHead, ...ch.map((c) => c.data), ...(audio ? audio.samples.map((s) => s.data) : []), box('moov', mvhd, ...traks)];
+    }
+    return { parse, decoderConfig, write };
+  })();
+
+  async function pickEncoderConfig(w, h) {
+    const base = { width: w, height: h, bitrate: w * h > 640 * 480 ? 5000000 : 2500000, framerate: 30, latencyMode: 'realtime' };
+    const cands = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'avc1.42e01f'].map((codec) => ({ ...base, codec, avc: { format: 'avc' } }))
+      .concat([{ ...base, codec: 'vp09.00.40.08' }]);
+    for (const cfg of cands) {
+      try { const r = await VideoEncoder.isConfigSupported(cfg); if (r && r.supported) return cfg; } catch (e) {}
+    }
+    return null;
+  }
+  function drawBadge(c, img, x, y, s) {
+    if (!img || !img.complete || !img.naturalWidth) return;
+    c.save(); c.beginPath(); c.arc(x + s / 2, y + s / 2, s / 2, 0, Math.PI * 2); c.clip();
+    c.drawImage(img, x, y, s, s); c.restore();
+  }
+  function drawWatermark(c, W, H, label, badge) {
+    const u = Math.min(W, H) / 480, pad = 16 * u, bs = 46 * u, tx = pad + bs + 10 * u;
+    c.save();
+    c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 10 * u;
+    drawBadge(c, badge, pad, pad, bs);
+    c.fillStyle = '#f7f7f5'; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+    c.font = '700 ' + Math.round(11 * u) + 'px Syncopate, "Arial Black", Helvetica, sans-serif';
+    c.fillText('APEX POWER & PERFORMANCE', tx, pad + 18 * u);
+    if (label) { c.font = '700 ' + Math.round(14 * u) + 'px "JetBrains Mono", Menlo, Consolas, monospace'; c.fillText(label, tx, pad + 38 * u); }
+    c.restore();
+  }
+  // blob: the camera recording (mp4). Returns a new mp4 Blob with the watermark burned into every frame.
+  async function watermarkBlob(blob, { label, badge, onProgress } = {}) {
+    if (!WM_OK) throw new Error('no WebCodecs');
+    const buf = await blob.arrayBuffer();
+    const { tracks } = MP4.parse(buf);
+    const vt = tracks.find((t) => t.kind === 'video' && t.samples.length), at = tracks.find((t) => t.kind === 'audio' && t.samples.length);
+    if (!vt) throw new Error('no video track');
+    let dcfg = null;
+    for (const cfg of [].concat(MP4.decoderConfig(vt) || [])) {
+      try { if ((await VideoDecoder.isConfigSupported(cfg)).supported) { dcfg = cfg; break; } } catch (e) {}
+    }
+    if (!dcfg) throw new Error('this browser can\'t decode ' + vt.entry);
+    const rot = vt.rotation, even = (v) => Math.max(2, Math.round(v / 2) * 2);
+    const W = even(rot % 180 ? vt.height : vt.width), H = even(rot % 180 ? vt.width : vt.height);
+    const ecfg = await pickEncoderConfig(W, H);
+    if (!ecfg) throw new Error('no supported video encoder');
+    try { if (document.fonts && document.fonts.load) await Promise.race([Promise.all([document.fonts.load('700 12px Syncopate'), document.fonts.load('700 12px "JetBrains Mono"')]), new Promise((r) => setTimeout(r, 1500))]); } catch (e) {}
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const c = cv.getContext('2d');
+    const out = []; let desc = null, err = null, done = 0, t0 = null;
+    const enc = new VideoEncoder({
+      output: (ch, meta) => {
+        const d = new Uint8Array(ch.byteLength); ch.copyTo(d);
+        out.push({ data: d, ts: ch.timestamp, dur: ch.duration, key: ch.type === 'key' });
+        const dsc = meta && meta.decoderConfig && meta.decoderConfig.description;
+        if (dsc) desc = dsc instanceof ArrayBuffer ? new Uint8Array(dsc.slice(0)) : new Uint8Array(dsc.buffer.slice(dsc.byteOffset, dsc.byteOffset + dsc.byteLength));
+      },
+      error: (e) => { err = err || e; }
+    });
+    enc.configure(ecfg);
+    const total = vt.samples.length;
+    const dec = new VideoDecoder({
+      output: (frame) => {
+        try {
+          const ts = frame.timestamp, dur = frame.duration;
+          if (t0 === null) t0 = ts;
+          c.save();
+          if (rot === 90) { c.translate(W, 0); c.rotate(Math.PI / 2); }
+          else if (rot === 180) { c.translate(W, H); c.rotate(Math.PI); }
+          else if (rot === 270) { c.translate(0, H); c.rotate(-Math.PI / 2); }
+          c.drawImage(frame, 0, 0, rot % 180 ? H : W, rot % 180 ? W : H);
+          c.restore();
+          frame.close();
+          drawWatermark(c, W, H, label, badge);
+          const vf = new VideoFrame(cv, dur ? { timestamp: ts - t0, duration: dur } : { timestamp: ts - t0 });
+          enc.encode(vf, { keyFrame: done % 60 === 0 });
+          vf.close();
+          done++;
+          if (onProgress && done % 5 === 0) onProgress(Math.min(0.99, done / total));
+        } catch (e) { err = err || e; try { frame.close(); } catch (e2) {} }
+      },
+      error: (e) => { err = err || e; }
+    });
+    dec.configure(dcfg);
+    const tick = () => new Promise((r) => setTimeout(r, 2));
+    let started = false;
+    for (const s of vt.samples) {
+      if (err) break;
+      if (!started) { if (!s.key) continue; started = true; }
+      while (dec.decodeQueueSize > 4 || enc.encodeQueueSize > 4) { if (err) break; await tick(); }
+      dec.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: Math.round(((s.dts + s.cts) * 1e6) / vt.timescale),
+        duration: Math.round((s.dur * 1e6) / vt.timescale), data: new Uint8Array(buf, s.offset, s.size) }));
+    }
+    if (!err) await dec.flush().catch((e) => { err = err || e; });
+    if (!err) await enc.flush().catch((e) => { err = err || e; });
+    try { dec.close(); } catch (e) {} try { enc.close(); } catch (e) {}
+    if (err) throw err;
+    if (!out.length) throw new Error('nothing was encoded');
+    let audio = null;
+    if (at) {
+      const vStart = t0 / 1e6 + vt.shift, ts = at.timescale, play = (s) => s.dts / ts + at.shift;
+      const as = at.samples.filter((s) => play(s) + s.dur / ts > vStart + 0.001);
+      if (as.length) {
+        const samples = as.map((s, i) => ({ data: new Uint8Array(buf, s.offset, s.size), dur: i + 1 < as.length ? Math.max(0, as[i + 1].dts - s.dts) : s.dur }));
+        audio = { stsd: new Uint8Array(buf, at.stsd.start, at.stsd.end - at.stsd.start), timescale: ts, samples, delayMs: (play(as[0]) - vStart) * 1000 };
+      }
+    }
+    const parts = MP4.write({ video: { codec: ecfg.codec, width: W, height: H, description: desc, chunks: out }, audio });
+    if (onProgress) onProgress(1);
+    return new Blob(parts, { type: 'video/mp4' });
+  }
+  // WATERMARK END
+
   // ---------- clips: record each set with the calls, lights, speed and bar path burned in ----------
   const clipCv = document.createElement('canvas'), cctx = clipCv.getContext('2d');
   clipCv.width = 640; clipCv.height = 480;
@@ -1578,7 +1939,7 @@ class BenchJudge {
     c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 10 * u; c.textBaseline = 'alphabetic';
     // brand and set, top left
     const bs = 46 * u;
-    if (badgeImg.complete && badgeImg.naturalWidth) c.drawImage(badgeImg, pad, pad, bs, bs);
+    drawBadge(c, badgeImg, pad, pad, bs);
     c.fillStyle = '#f7f7f5'; c.textAlign = 'left';
     c.font = '700 ' + Math.round(11 * u) + 'px ' + disp; c.fillText('APEX POWER & PERFORMANCE', pad + bs + 10 * u, pad + 18 * u);
     c.font = '700 ' + Math.round(14 * u) + 'px ' + mono; c.fillText(clipLabel(), pad + bs + 10 * u, pad + 38 * u);
@@ -1616,12 +1977,44 @@ class BenchJudge {
     const ext = /mp4/i.test(type) ? 'mp4' : 'webm', d = new Date(), z = (n) => String(n).padStart(2, '0');
     const name = 'apex-bench-' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()) + (r.meta.set ? '-set' + r.meta.set : '') + '.' + ext;
     const clip = { blob, type, name, url: URL.createObjectURL(blob), secs: Math.max(0, (r.wallEnd - r.wallStart) / 1000), meta: r.meta, when: d, w: r.w, h: r.h, overlay: r.overlay, audio: r.audio };
-    try { clip.file = new File([blob], name, { type }); } catch (e) { clip.file = null; }
-    clip.canShare = !!(clip.file && navigator.canShare && navigator.canShare({ files: [clip.file] }));
+    refreshFile(clip);
     clipList.unshift(clip);
     while (clipList.length > MAX_CLIPS) URL.revokeObjectURL(clipList.pop().url);
     renderClipList();
-    checkClipTiming(clip);
+    checkClipTiming(clip).catch(() => {}).then(() => queueWatermark(clip));
+  }
+  function refreshFile(c) {
+    try { c.file = new File([c.blob], c.name, { type: c.type }); } catch (e) { c.file = null; }
+    c.canShare = !!(c.file && navigator.canShare && navigator.canShare({ files: [c.file] }));
+  }
+  function wmLabel(c) {
+    const reps = c.meta.reps, sp = reps.map((x) => x.mean).filter((x) => x !== null && x !== undefined);
+    const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'], d = c.when;
+    let t = (c.meta.set ? 'SET ' + c.meta.set + ' · ' : '') + reps.length + (reps.length === 1 ? ' REP' : ' REPS');
+    if (sp.length) t += ' · ' + (sp.length > 1 ? 'BEST ' : '') + Math.max(...sp).toFixed(2) + ' m/s';
+    return t + ' · ' + d.getDate() + ' ' + M[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  // Brand each camera clip in the background, one at a time, so Save is ready by the time it's tapped.
+  let wmQueue = Promise.resolve();
+  function queueWatermark(clip) {
+    if (clip.overlay) { clip.wm = 'done'; renderClipList(); return; } // the overlay recording already has it burned in
+    if (!WM_OK || !/mp4/i.test(clip.type)) { clip.wm = 'failed'; renderClipList(); return; }
+    clip.wm = 'working'; clip.wmPct = 0; renderClipList();
+    wmQueue = wmQueue.then(async () => {
+      if (!clipList.includes(clip)) return;
+      try {
+        const out = await watermarkBlob(clip.blob, { label: wmLabel(clip), badge: badgeImg, onProgress: (f) => { clip.wmPct = f; showWmProgress(clip); } });
+        if (!clipList.includes(clip)) return;
+        URL.revokeObjectURL(clip.url);
+        clip.blob = out; clip.type = 'video/mp4'; clip.url = URL.createObjectURL(out);
+        clip.name = clip.name.replace(/\.\w+$/, '.mp4');
+        refreshFile(clip); clip.wm = 'done';
+      } catch (e) { clip.wm = 'failed'; clip.wmErr = String((e && e.message) || e); }
+      renderClipList();
+    });
+  }
+  function showWmProgress(c) {
+    if (c.saveBtn && c.wm === 'working') c.saveBtn.textContent = 'Adding watermark ' + Math.round((c.wmPct || 0) * 100) + '%';
   }
   // How long does the saved file actually play? (Browsers that leave the length out of the file
   // report Infinity until asked to seek to the end.)
@@ -1687,10 +2080,14 @@ class BenchJudge {
       sub.textContent = (sp.length ? sp.map((x) => x.toFixed(2)).join(' · ') + ' m/s · ' : '') + fmtDur(c.secs) + ' · ' + c.when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       info.append(title, sub);
       if (c.badTiming) { const b = document.createElement('span'); b.className = 'bad'; b.textContent = 'This clip plays at the wrong speed (' + fmtDur(c.playSecs) + ' instead of ' + fmtDur(c.secs) + ').'; info.append(b); }
+      if (c.wm === 'failed') { const b = document.createElement('span'); b.className = 'bad'; b.textContent = 'This phone couldn\'t add the watermark, so this clip saves without it.'; info.append(b); }
       const btns = document.createElement('div'); btns.className = 'clipBtns';
       const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; b.addEventListener('click', fn); btns.appendChild(b); return b; };
-      mk('Save', 'btn primary', () => saveClip(c));
-      if (c.canShare) mk('Download', 'btn', () => downloadClip(c));
+      const working = c.wm === 'working' || c.wm === undefined;
+      c.saveBtn = mk(working ? 'Adding watermark' : 'Save', 'btn primary', () => saveClip(c));
+      c.saveBtn.disabled = working;
+      if (working) showWmProgress(c);
+      if (c.canShare && !working) mk('Download', 'btn', () => downloadClip(c));
       let armedAt = 0;
       const del = mk('Delete', 'btn', () => {
         if (Date.now() - armedAt > 3000) { armedAt = Date.now(); del.textContent = 'Tap again to delete'; setTimeout(() => { del.textContent = 'Delete'; }, 3000); return; }
