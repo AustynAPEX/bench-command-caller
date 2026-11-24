@@ -300,21 +300,11 @@ tr.setbreak td { border-top: 2px solid var(--line); }
             <option value="8">8</option><option value="10">10</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field wide">
           <label for="body">Feet and hips check</label>
           <select id="body">
-            <option value="off">Off</option>
-            <option value="strict">Strict</option>
-            <option value="normal">Normal</option>
-            <option value="loose">Loose</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="still">Bar motionless test</label>
-          <select id="still">
-            <option value="strict">Strict</option>
-            <option value="normal">Normal</option>
-            <option value="loose">Loose</option>
+            <option value="on">On</option>
+            <option value="off">Off (bar only)</option>
           </select>
         </div>
         <label class="check field wide" for="buzzOn"><input type="checkbox" id="buzzOn"> Buzzer on an early press</label>
@@ -383,13 +373,6 @@ tr.setbreak td { border-top: 2px solid var(--line); }
           <input type="number" id="plateCm" min="20" max="60" step="0.5" inputmode="decimal">
         </div>
         <label class="check field wide" for="showMask"><input type="checkbox" id="showMask"> Show what the tracker sees (white = following, red = ignoring)</label>
-        <div class="field wide">
-          <label for="fps">Camera frame rate</label>
-          <select id="fps">
-            <option value="30">30 fps (recommended)</option>
-            <option value="60">60 fps (experimental, sharper on fast reps)</option>
-          </select>
-        </div>
         <div class="field" id="travelField" hidden>
           <label for="travelCm">Chest to lockout (cm)</label>
           <input type="number" id="travelCm" min="10" max="80" step="0.5" inputmode="decimal">
@@ -423,7 +406,7 @@ tr.setbreak td { border-top: 2px solid var(--line); }
   </div>
 
   <footer class="foot">
-    <span>Apex Power &amp; Performance · build 12</span>
+    <span>Apex Power &amp; Performance · build 13</span>
     <a href="https://www.apexpowerperformance.com" target="_blank" rel="noopener">apexpowerperformance.com</a>
   </footer>
 </main>
@@ -436,13 +419,13 @@ class BenchJudge {
   constructor(cfg = {}) {
     this.cfg = Object.assign({
       minDelay: 0.6, maxDelay: 2.0, reps: 1,
-      stillTol: 0.010,   // bar counts as motionless if it stays inside this box
+      stillTol: 0.015,   // bar counts as motionless if it stays inside this box
       moveTol: 0.04,     // travel that counts as an unrack / rerack
       minRom: 0.07,      // minimum travel from lockout before a stop counts as the chest
       earlyTol: 0.02,    // upward travel that counts as pressing
       startHold: 1000,   // bar (and body) still this long before Start
       tempo: { on: false, ecc: 3, pause: 1, con: null, top: 0 }, // seconds; con null = X (explosive)
-      bodyCheck: true, bodyTol: 0.008, // share of the frame allowed to change while "still"
+      bodyCheck: true, bodyTol: 0.016, // share of the frame allowed to change while "still"
       chestHold: 200, lockHold: 300, restHold: 2500, missAfter: 8000,
       rand: Math.random
     }, cfg);
@@ -655,16 +638,18 @@ class BenchJudge {
   const C = (n) => css.getPropertyValue(n).trim();
   const COL = { white: C('--white'), red: C('--red'), amber: C('--amber'), line: C('--line'), muted: C('--muted') };
 
-  const STILL = { strict: 0.007, normal: 0.010, loose: 0.015 };
-  const BODY = { strict: 0.004, normal: 0.008, loose: 0.016 };
-  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, still: 'normal', body: 'normal', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, fps: 30, fpsChosen: false, showMask: false, clipsOn: true, clipOverlay: false, clipPath: true, clipAudioBad: false, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
+  // Start-call stillness is always the loose setting (the old strict/normal choices are gone).
+  const STILL_TOL = 0.015, BODY_TOL = 0.016;
+  const DEFAULTS = { minDelay: 0.6, maxDelay: 2.0, startHold: 1.0, reps: 1, body: 'on', tol: 4, voiceMode: 'apex', voiceChosen: false, buzz: true, scale: 'plate', plateCm: 45, travelCm: 40, showMask: false, clipsOn: true, clipOverlay: false, clipPath: true, clipAudioBad: false, tempoOn: false, tEcc: 3, tPause: 1, tCon: 'X', tTop: 0 };
   const KEY = 'benchCommandCaller.v1';
   let settings = { ...DEFAULTS };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY)) || {};
     if (saved.voiceMode === undefined && saved.voice === false) { saved.voiceMode = 'beeps'; saved.voiceChosen = true; } // older "speak the commands" switch
     if (!saved.voiceChosen && saved.voiceMode === 'phone') saved.voiceMode = 'apex';
-    if (!saved.fpsChosen) delete saved.fps; // never picked: use the steadier 30 fps default // never picked: use the coach's voice when it's there
+    delete saved.fps; delete saved.fpsChosen; // 60 fps option removed: everyone runs 30
+    delete saved.still; // strict/normal/loose removed: always loose
+    if (saved.body !== undefined) saved.body = saved.body === 'off' ? 'off' : 'on';
     delete saved.voice;
     settings = { ...DEFAULTS, ...saved };
   } catch (e) {}
@@ -693,8 +678,8 @@ class BenchJudge {
     const tcon = settings.tCon === 'X' ? null : Number(settings.tCon);
     judge.set({
       minDelay: settings.minDelay, maxDelay: settings.maxDelay, reps: Number(settings.reps),
-      startHold: settings.startHold * 1000, stillTol: STILL[settings.still] || STILL.normal,
-      bodyCheck: settings.body !== 'off', bodyTol: BODY[settings.body] || BODY.normal,
+      startHold: settings.startHold * 1000, stillTol: STILL_TOL,
+      bodyCheck: settings.body !== 'off', bodyTol: BODY_TOL,
       tempo: { on: !!settings.tempoOn, ecc: Number(settings.tEcc), pause: Number(settings.tPause), con: tcon, top: Number(settings.tTop) }
     });
     const code = settings.tEcc + '-' + settings.tPause + '-' + settings.tCon + '-' + settings.tTop;
@@ -713,8 +698,7 @@ class BenchJudge {
     $('maxDelay').value = settings.maxDelay.toFixed(1);
     $('startHold').value = settings.startHold.toFixed(1);
     $('reps').value = String(settings.reps);
-    $('still').value = settings.still;
-    $('body').value = settings.body;
+    $('body').value = settings.body === 'off' ? 'off' : 'on';
     $('tol').value = settings.tol;
     $('tolOut').textContent = '(' + settings.tol + '/10)';
     $('voiceMode').value = settings.voiceMode === 'apex' && !apexReady ? 'phone' : settings.voiceMode;
@@ -722,7 +706,6 @@ class BenchJudge {
     $('scale').value = settings.scale;
     $('plateCm').value = settings.plateCm;
     $('travelCm').value = settings.travelCm;
-    $('fps').value = String(settings.fps);
     $('showMask').checked = !!settings.showMask;
     $('clipsOn').checked = !!settings.clipsOn;
     $('clipPath').checked = !!settings.clipPath;
@@ -749,7 +732,6 @@ class BenchJudge {
   bind('maxDelay', 'maxDelay', (el) => parseFloat(el.value));
   bind('startHold', 'startHold', (el) => parseFloat(el.value));
   bind('reps', 'reps', (el) => Number(el.value));
-  bind('still', 'still', (el) => el.value);
   bind('body', 'body', (el) => el.value);
   bind('tol', 'tol', (el) => Number(el.value), 'input');
   bind('voiceMode', 'voiceMode', (el) => { settings.voiceChosen = true; return el.value; });
@@ -757,7 +739,6 @@ class BenchJudge {
   bind('scale', 'scale', (el) => el.value);
   bind('plateCm', 'plateCm', (el) => parseFloat(el.value));
   bind('travelCm', 'travelCm', (el) => parseFloat(el.value));
-  $('fps').addEventListener('change', (e) => { settings.fps = Number(e.target.value); settings.fpsChosen = true; applySettings(); if (stream) startCamera(); });
   bind('showMask', 'showMask', (el) => el.checked);
   bind('clipsOn', 'clipsOn', (el) => el.checked);
   bind('clipPath', 'clipPath', (el) => el.checked);
@@ -1045,7 +1026,7 @@ class BenchJudge {
     const fill = $('bodyFill'), state = $('bodyState');
     if (settings.body === 'off') { fill.style.width = '0'; state.textContent = 'Check off'; return; }
     if (bodyNow === null) { fill.style.width = '0'; state.textContent = '–'; return; }
-    const tol = BODY[settings.body] || BODY.normal;
+    const tol = BODY_TOL;
     bodyShown += 0.35 * (bodyNow - bodyShown);
     fill.style.width = Math.min(100, (bodyShown / (tol * 2)) * 100) + '%';
     const moving = bodyNow > tol;
@@ -1415,7 +1396,7 @@ class BenchJudge {
     const el = $('fpsNote');
     if (!frameDt) { el.textContent = ''; return; }
     const fps = Math.round(1000 / frameDt);
-    el.textContent = 'Camera running at ' + fps + ' fps' + (fps >= 50 || Number(settings.fps) === 30 ? '.' : '. This phone or browser won\'t give 60 fps here, so fast reps are less precise.');
+    el.textContent = 'Camera running at ' + fps + ' fps.';
   }
   function startLoop() {
     const id = ++loopId;
@@ -1851,7 +1832,7 @@ class BenchJudge {
   function clipTracks(withAudio, overlay) {
     let vt;
     if (overlay) {
-      if (!clipStream) clipStream = clipCv.captureStream(Number(settings.fps) === 60 ? 60 : 30);
+      if (!clipStream) clipStream = clipCv.captureStream(30);
       vt = clipStream.getVideoTracks();
     } else vt = stream ? stream.getVideoTracks() : [];
     const tracks = vt.slice();
@@ -2110,15 +2091,8 @@ class BenchJudge {
     try {
       if (stream) stream.getTracks().forEach((t) => t.stop());
       stream = null;
-      // 60 fps: ask for it first (many phones only offer it at 720p), fall back to whatever the camera gives.
-      // 30 fps: steadier under flickering gym lights.
-      const tries = Number(settings.fps) !== 60
-        ? [{ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, {}]
-        : [
-            { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 50 } },
-            { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, min: 50 } },
-            { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }
-          ];
+      // 30 fps at 640x480: steadiest tracking, and steady under flickering gym lights.
+      const tries = [{ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }, {}];
       let s = null, lastErr = null;
       for (const v of tries) {
         try { s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, ...v } }); break; }
